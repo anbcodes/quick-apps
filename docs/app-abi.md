@@ -14,6 +14,9 @@ these docs are the contract the SDK implements.
 | `qa_start` | `()` | Once, after instantiation. The app builds its first tree here. |
 | `qa_event` | `(ptr: u32, len: u32)` | Once per event ([events.md](events.md)). The app frees the buffer. |
 
+If the module also exports `_initialize: ()` (TinyGo and other "reactor"
+toolchains do), the runtime calls it once before `qa_start`.
+
 Calls are never re-entrant. The runtime makes one call at a time on the app
 thread.
 

@@ -543,6 +543,10 @@ fn instantiate(s: Setup, shared: Arc<Shared>, tx: Sender<FromApp>) -> Result<(In
     let mut linker = Linker::new(&engine);
     define(&mut linker).map_err(|e| e.to_string())?;
     let inst = linker.instantiate_and_start(&mut store, &module).map_err(|e| format!("cannot start the app: {e}"))?;
+    // Some toolchains (TinyGo) set up their runtime in an exported `_initialize`.
+    if let Ok(init) = inst.get_typed_func::<(), ()>(&store, "_initialize") {
+        call(&mut store, &init, ()).map_err(|e| format!("_initialize: {e}"))?;
+    }
     let memory = inst.get_memory(&store, "memory").ok_or("the app exports no `memory`")?;
     let alloc = inst.get_typed_func::<u32, u32>(&store, "qa_alloc").map_err(|e| format!("qa_alloc: {e}"))?;
     let event = inst.get_typed_func::<(u32, u32), ()>(&store, "qa_event").map_err(|e| format!("qa_event: {e}"))?;
