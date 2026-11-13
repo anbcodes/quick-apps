@@ -1,0 +1,14 @@
+[package]
+name = "qa"
+version.workspace = true
+edition.workspace = true
+description = "Quick Apps runtime"
+
+[dependencies]
+libc.workspace = true
+ttf-parser.workspace = true
+qa-proto = { path = "../qa-proto", features = ["alloc"] }
+wasmi.workspace = true
+wasmi_core.workspace = true
+mhttp.workspace = true
+miniz_oxide.workspace = true

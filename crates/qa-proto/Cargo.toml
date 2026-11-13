@@ -1,0 +1,9 @@
+[package]
+name = "qa-proto"
+version.workspace = true
+edition.workspace = true
+description = "Quick Apps wire format: op, event and prop ids, and their encoding"
+
+[features]
+default = []
+alloc = []

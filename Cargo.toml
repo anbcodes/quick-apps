@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = ["crates/qa", "crates/qa-proto", "crates/qa-sdk"]
+exclude = ["examples"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+libc = "0.2"
+ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
+wasmi = { version = "2", default-features = false, features = ["std", "validate"] }
+mhttp = { path = "../mtui/crates/mhttp" }
+miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
+wasmi_core = { version = "2", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

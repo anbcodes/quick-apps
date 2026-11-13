@@ -1,0 +1,147 @@
+//! The seam between the runtime and the windowing system.
+//!
+//! Coordinates in events and frames are physical pixels.
+
+pub mod wayland;
+
+use std::os::fd::RawFd;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Rect {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
+impl Rect {
+    pub const fn new(x: i32, y: i32, w: i32, h: i32) -> Rect {
+        Rect { x, y, w, h }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.w <= 0 || self.h <= 0
+    }
+    pub fn right(&self) -> i32 {
+        self.x + self.w
+    }
+    pub fn bottom(&self) -> i32 {
+        self.y + self.h
+    }
+    pub fn area(&self) -> i64 {
+        if self.is_empty() {
+            0
+        } else {
+            self.w as i64 * self.h as i64
+        }
+    }
+    pub fn intersect(&self, o: &Rect) -> Rect {
+        let x = self.x.max(o.x);
+        let y = self.y.max(o.y);
+        let r = self.right().min(o.right());
+        let b = self.bottom().min(o.bottom());
+        Rect::new(x, y, (r - x).max(0), (b - y).max(0))
+    }
+    pub fn union(&self, o: &Rect) -> Rect {
+        if self.is_empty() {
+            return *o;
+        }
+        if o.is_empty() {
+            return *self;
+        }
+        let x = self.x.min(o.x);
+        let y = self.y.min(o.y);
+        let r = self.right().max(o.right());
+        let b = self.bottom().max(o.bottom());
+        Rect::new(x, y, r - x, b - y)
+    }
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        x >= self.x as f32 && y >= self.y as f32 && x < self.right() as f32 && y < self.bottom() as f32
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PEvent {
+    /// The window changed size or scale. `w`/`h` are physical pixels.
+    Resize { w: i32, h: i32, scale: f32 },
+    Close,
+    /// A frame callback fired: a good time to draw the next animation frame.
+    FrameDone,
+    /// A buffer came back from the compositor; a blocked draw can retry.
+    BufferFree,
+    PointerMove { x: f32, y: f32 },
+    PointerLeave,
+    Button { button: u32, pressed: bool, x: f32, y: f32 },
+    /// Scroll deltas in physical pixels. Positive `dy` scrolls down.
+    Scroll { dx: f32, dy: f32 },
+    Key { sym: u32, text: String, pressed: bool, repeat: bool, mods: u8 },
+    Mods(u8),
+    FocusIn,
+    FocusOut,
+    Paste(String),
+}
+
+pub const BUTTON_LEFT: u32 = 0x110;
+pub const BUTTON_RIGHT: u32 = 0x111;
+pub const BUTTON_MIDDLE: u32 = 0x112;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cursor {
+    Default,
+    Pointer,
+    Text,
+    Move,
+    NotAllowed,
+    ResizeEW,
+    ResizeNS,
+    ResizeNWSE,
+    ResizeNESW,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Edge {
+    Top,
+    Bottom,
+    Left,
+    Right,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+pub struct Frame<'a> {
+    /// Premultiplied ARGB8888, row-major.
+    pub px: &'a mut [u32],
+    pub w: i32,
+    pub h: i32,
+    /// In pixels, not bytes.
+    pub stride: usize,
+    /// How many frames old the buffer's contents are. 0 means unknown: redraw everything.
+    pub age: u32,
+}
+
+pub trait Platform {
+    /// A file descriptor the main loop polls for readability.
+    fn fd(&self) -> RawFd;
+    /// Reads and handles everything pending, without blocking.
+    fn dispatch(&mut self, out: &mut Vec<PEvent>);
+    /// Sends queued requests. Call before sleeping in poll().
+    fn flush(&mut self);
+    /// The next buffer to draw into, or None when none is free yet.
+    fn frame(&mut self) -> Option<Frame<'_>>;
+    /// Shows the buffer returned by the last `frame()`. `damage` is in buffer pixels.
+    fn present(&mut self, damage: &[Rect]);
+    /// Asks for a `FrameDone` after the next present.
+    fn request_frame(&mut self);
+    fn size(&self) -> (i32, i32, f32);
+    fn set_title(&mut self, title: &str);
+    fn set_cursor(&mut self, cursor: Cursor);
+    fn set_min_size(&mut self, w: i32, h: i32);
+    fn begin_move(&mut self);
+    fn begin_resize(&mut self, edge: Edge);
+    /// Whether the window manager draws the title bar.
+    fn has_server_decorations(&self) -> bool;
+    fn clipboard_set(&mut self, text: String);
+    /// Answered later with `PEvent::Paste`.
+    fn clipboard_get(&mut self);
+}

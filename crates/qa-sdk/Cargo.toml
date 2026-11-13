@@ -1,0 +1,13 @@
+[package]
+name = "qa-sdk"
+version.workspace = true
+edition.workspace = true
+description = "Write Quick Apps in Rust (no_std + alloc)"
+
+[features]
+default = []
+# Bring your own #[global_allocator].
+no-alloc = []
+
+[dependencies]
+qa-proto = { path = "../qa-proto", features = ["alloc"] }
