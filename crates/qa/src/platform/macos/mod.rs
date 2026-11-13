@@ -68,6 +68,10 @@ impl Mac {
         Ok(Mac { buf: Vec::new(), w: 0, h: 0, fresh: false, default_size: (900, 600), frame_due: None, paste: false, idle, pending: Vec::new(), title: title.to_string(), app_id: app_id.to_string() })
     }
 
+    pub fn set_default_size(&mut self, size: (i32, i32)) {
+        self.default_size = size;
+    }
+
     fn ensure_open(&mut self) {
         if self.w != 0 {
             return;

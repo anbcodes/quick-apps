@@ -5,7 +5,7 @@
 #[cfg(target_os = "linux")]
 pub mod wayland;
 #[cfg(target_os = "linux")]
-pub use wayland::Wayland as Native;
+pub mod x11;
 #[cfg(target_os = "macos")]
 pub mod macos;
 #[cfg(target_os = "macos")]
@@ -159,4 +159,102 @@ pub trait Platform {
     fn clipboard_set(&mut self, text: String);
     /// Answered later with `PEvent::Paste`.
     fn clipboard_get(&mut self);
+}
+
+/// The window system in use on Linux, chosen when the window opens.
+#[cfg(target_os = "linux")]
+pub enum Native {
+    Wayland(Box<wayland::Wayland>),
+    X11(Box<x11::X11>),
+}
+
+#[cfg(target_os = "linux")]
+macro_rules! each {
+    ($s:expr, $p:ident => $e:expr) => {
+        match $s {
+            Native::Wayland($p) => $e,
+            Native::X11($p) => $e,
+        }
+    };
+}
+
+#[cfg(target_os = "linux")]
+impl Native {
+    /// Wayland if the session has it, else X11. `QA_BACKEND=wayland` or `x11` forces one.
+    pub fn connect(title: &str, app_id: &str) -> std::io::Result<Native> {
+        let way = || wayland::Wayland::connect(title, app_id).map(|w| Native::Wayland(Box::new(w)));
+        let x = || x11::X11::connect(title, app_id).map(|x| Native::X11(Box::new(x)));
+        match std::env::var("QA_BACKEND").as_deref() {
+            Ok("wayland") => return way(),
+            Ok("x11") => return x(),
+            _ => {}
+        }
+        let has_x = std::env::var_os("DISPLAY").is_some();
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() || !has_x {
+            match way() {
+                Ok(n) => return Ok(n),
+                Err(e) if !has_x => return Err(e),
+                Err(e) => {
+                    return x().map_err(|e2| std::io::Error::other(format!("{e}; and X11: {e2}")));
+                }
+            }
+        }
+        x()
+    }
+
+    pub fn set_default_size(&mut self, size: (i32, i32)) {
+        each!(self, p => p.default_size = size)
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Platform for Native {
+    fn fd(&self) -> RawFd {
+        each!(self, p => p.fd())
+    }
+    fn wait(&mut self, extra: &[RawFd], timeout_ms: i32) -> bool {
+        each!(self, p => p.wait(extra, timeout_ms))
+    }
+    fn dispatch(&mut self, out: &mut Vec<PEvent>) {
+        each!(self, p => p.dispatch(out))
+    }
+    fn flush(&mut self) {
+        each!(self, p => p.flush())
+    }
+    fn frame(&mut self) -> Option<Frame<'_>> {
+        each!(self, p => p.frame())
+    }
+    fn present(&mut self, damage: &[Rect]) {
+        each!(self, p => p.present(damage))
+    }
+    fn request_frame(&mut self) {
+        each!(self, p => p.request_frame())
+    }
+    fn size(&self) -> (i32, i32, f32) {
+        each!(self, p => p.size())
+    }
+    fn set_title(&mut self, title: &str) {
+        each!(self, p => p.set_title(title))
+    }
+    fn set_cursor(&mut self, cursor: Cursor) {
+        each!(self, p => p.set_cursor(cursor))
+    }
+    fn set_min_size(&mut self, w: i32, h: i32) {
+        each!(self, p => p.set_min_size(w, h))
+    }
+    fn begin_move(&mut self) {
+        each!(self, p => p.begin_move())
+    }
+    fn begin_resize(&mut self, edge: Edge) {
+        each!(self, p => p.begin_resize(edge))
+    }
+    fn has_server_decorations(&self) -> bool {
+        each!(self, p => p.has_server_decorations())
+    }
+    fn clipboard_set(&mut self, text: String) {
+        each!(self, p => p.clipboard_set(text))
+    }
+    fn clipboard_get(&mut self) {
+        each!(self, p => p.clipboard_get())
+    }
 }

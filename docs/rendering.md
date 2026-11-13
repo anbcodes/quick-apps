@@ -79,6 +79,29 @@ scrolling, an indeterminate progress bar). The text caret does not blink, so a
 focused input costs nothing while idle. Otherwise the
 process sleeps in `poll()`.
 
+## X11 platform
+
+The X11 client (`platform/x11.rs`) is also hand-written over `libc`, speaking the
+core protocol on the display's unix socket. No libX11 or xcb. It handles local
+displays only (`:N`), with the MIT-MAGIC-COOKIE from `$XAUTHORITY` or
+`~/.Xauthority`, and needs a 24-bit TrueColor screen.
+
+- **Choosing.** `Native::connect` uses Wayland when `WAYLAND_DISPLAY` is set and
+  works, and falls back to X11 when `DISPLAY` is set. `QA_BACKEND=x11` or
+  `wayland` forces one.
+- **Drawing.** `present` sends each damaged rectangle with `PutImage`, split to fit
+  the server's maximum request size. Nothing keeps the window's pixels, so an
+  Expose event repaints the whole buffer. MIT-SHM would be faster for large
+  windows and isn't used yet.
+- **Keys.** The server's keyboard mapping gives X keysyms directly, which are what
+  the runtime already uses. Shift, Caps Lock, Num Lock and AltGr pick the column.
+  The server repeats keys itself. Dead keys and input methods aren't supported.
+- **Scale.** X has no per-window scale, so it comes from `Xft.dpi` in the root
+  window's `RESOURCE_MANAGER` (96 dpi is 1.0), rounded to quarters.
+- **Clipboard.** `CLIPBOARD` selection with `UTF8_STRING` and `STRING`; large
+  transfers (INCR) aren't supported.
+- The window manager draws the title bar, and `WM_DELETE_WINDOW` becomes `Close`.
+
 ## macOS platform
 
 The Mac window is an `NSWindow` with one layer-backed `NSView`, driven through a

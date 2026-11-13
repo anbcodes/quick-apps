@@ -109,7 +109,7 @@ fn run_native_sized(d: &mut dyn shell::Driver, title: &str, app_id: &str, size: 
             return 1;
         }
     };
-    p.default_size = size;
+    p.set_default_size(size);
     let ui = ui::Ui::new(fonts, ui::theme::Theme::load(app_id.strip_prefix("qa-")));
     let mut sh = shell::Shell::new(p, ui);
     sh.last_title = title.to_string();
