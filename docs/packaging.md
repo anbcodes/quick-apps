@@ -209,6 +209,21 @@ whether to open `qa` links. Then `qa open`:
      or command. The next click on the link asks again.
    - **Cancel** or Escape throws the download away.
 
+### On macOS
+
+Menu entries are `.app` bundles in `~/Applications`. `qa install` writes
+`<Name>.app` with a one-line launcher (`exec qa run <manifest url>`), an
+`Info.plist`, and an icon made from `icon.png` with `sips` and `iconutil`, and
+tells Launch Services about it. They show up in Spotlight and Launchpad. The
+bundle path is saved in the app's folder as `bundle_path`, so updates and
+`qa remove` find it.
+
+`qa setup` writes `~/Applications/Quick Apps.app`, which declares the `qa`
+URL scheme. Its launcher runs `qa url-handler`, which waits for the Apple Event
+that carries the link and then does what `qa open` does. Command links in
+`~/.local/bin` work the same as on Linux. Link sockets live in
+`/tmp/quick-apps-<uid>`.
+
 ### Bootstrap
 
 People without `qa` yet run the install script, which a site serves next to
@@ -218,6 +233,7 @@ the runtime binary (see `site/build.sh`):
 curl -fsSL https://quick-apps.example/install.sh | sh -s -- https://apps.example.com/notes/app.json
 ```
 
-It downloads `qa-x86_64-linux`, checks its sha256, moves it to
+It picks `qa-x86_64-linux`, `qa-x86_64-darwin` or `qa-aarch64-darwin` for the
+machine, checks its sha256, moves it to
 `~/.local/bin/qa`, runs `qa setup`, and then `qa open` on the URL if one was
 given. It needs no root.

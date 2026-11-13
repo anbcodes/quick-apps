@@ -2,7 +2,14 @@
 //!
 //! Coordinates in events and frames are physical pixels.
 
+#[cfg(target_os = "linux")]
 pub mod wayland;
+#[cfg(target_os = "linux")]
+pub use wayland::Wayland as Native;
+#[cfg(target_os = "macos")]
+pub mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::Mac as Native;
 
 use std::os::fd::RawFd;
 
@@ -123,6 +130,14 @@ pub struct Frame<'a> {
 pub trait Platform {
     /// A file descriptor the main loop polls for readability.
     fn fd(&self) -> RawFd;
+    /// Blocks until the platform has events or one of `extra` is readable, or for `timeout_ms`
+    /// (-1 for no limit). Platforms that can't poll their event source override this.
+    fn wait(&mut self, extra: &[RawFd], timeout_ms: i32) -> bool {
+        let mut fds = vec![libc::pollfd { fd: self.fd(), events: libc::POLLIN, revents: 0 }];
+        fds.extend(extra.iter().map(|&fd| libc::pollfd { fd, events: libc::POLLIN, revents: 0 }));
+        let r = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as _, timeout_ms) };
+        r >= 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR)
+    }
     /// Reads and handles everything pending, without blocking.
     fn dispatch(&mut self, out: &mut Vec<PEvent>);
     /// Sends queued requests. Call before sleeping in poll().

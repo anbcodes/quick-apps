@@ -10,6 +10,7 @@ mod platform;
 mod prompt;
 mod shell;
 mod shot;
+mod sys;
 mod text;
 mod todo;
 mod ui;
@@ -51,6 +52,8 @@ fn main() {
         Some("install") if args.len() == 2 => cli::install(&args[1]),
         Some("open") if args.len() == 2 => open::open(&args[1]),
         Some("setup") => cli::setup(),
+        #[cfg(target_os = "macos")]
+        Some("url-handler") => url_handler(),
         Some("list") => cli::list(),
         Some("update") if args.len() == 2 => cli::update(&args[1]),
         Some("rollback") if args.len() == 2 => cli::rollback(&args[1]),
@@ -73,6 +76,15 @@ fn main() {
     std::process::exit(code);
 }
 
+/// What the `qa:` link app runs: waits for the link the system sends it, then opens it.
+#[cfg(target_os = "macos")]
+fn url_handler() -> i32 {
+    match platform::macos::wait_url(10_000) {
+        Some(url) => open::open(&url),
+        None => 0,
+    }
+}
+
 fn load_fonts() -> Option<text::Fonts> {
     let mut fonts = text::Fonts::new();
     if fonts.find_first(text::DEFAULT_SANS).is_none() {
@@ -90,7 +102,7 @@ fn run_native(mut d: impl shell::Driver, title: &str, app_id: &str) -> i32 {
 /// compositor picks one.
 fn run_native_sized(d: &mut dyn shell::Driver, title: &str, app_id: &str, size: (i32, i32)) -> i32 {
     let Some(fonts) = load_fonts() else { return 1 };
-    let mut p = match platform::wayland::Wayland::connect(title, app_id) {
+    let mut p = match platform::Native::connect(title, app_id) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("qa: {e}");

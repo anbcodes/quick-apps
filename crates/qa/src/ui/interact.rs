@@ -458,7 +458,11 @@ impl Ui {
                 let _ = self.set_prop(id, prop::checkbox::CHECKED, super::Val::I(v as i32));
                 self.out.push(UiEvent::Toggle(id, v));
             }
-            kind::SELECT => self.open_select = id,
+            kind::SELECT => {
+                self.open_select = id;
+                // The list is drawn over other nodes, so nothing else marks its area.
+                self.damage_all();
+            }
             _ => {}
         }
         let _ = keyboard;

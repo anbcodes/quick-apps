@@ -303,13 +303,8 @@ fn define(l: &mut Linker<Host>) -> Result<(), Error> {
     l.func_wrap(M, "mono_ms", || -> i64 { mono_ms() })?;
     l.func_wrap(M, "random", |mut c: Caller<'_, Host>, ptr: u32, len: u32| -> Result<(), Error> {
         let mut b = vec![0u8; len as usize];
-        let mut off = 0;
-        while off < b.len() {
-            let n = unsafe { libc::getrandom(b[off..].as_mut_ptr() as *mut _, b.len() - off, 0) };
-            if n <= 0 {
-                return Err(Error::new("getrandom failed"));
-            }
-            off += n as usize;
+        if !crate::sys::random(&mut b) {
+            return Err(Error::new("getrandom failed"));
         }
         write(&mut c, ptr, &b)
     })?;

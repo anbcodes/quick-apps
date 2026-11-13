@@ -69,7 +69,7 @@ nobody has to argue it again.
 | Question | Decision | Why |
 |---|---|---|
 | CPU limit | **50% of one core, averaged over 10 s** (not 50% of the whole system) | Wasm here is single-threaded, so on a multi-core machine an app could never hit 50% of the system. The point of the limit is to catch busy loops and battery drain. |
-| Fonts | **System fonts** (DejaVu, Noto or Liberation, found on disk). None in the binary. | Keeps the binary small. Every Linux desktop has one of them. If none is found, `qa` exits with a message naming the `font.family` token to set. Revisit when a platform without them is added. |
+| Fonts | **System fonts** (DejaVu, Noto or Liberation, found on disk). None in the binary. | Keeps the binary small. Every Linux desktop has one of them. If none is found, `qa` exits with a message naming the `font.family` token to set. On macOS the system Arial, Courier New and Apple Symbols are used. |
 | Theme precedence | **App `CTX` beats the user theme**, except tokens the user locks with `!` | Apps need small, local styling (a red tag, an accented header). The user still has the final say through locks and per-app theme files. |
 | Message consent | **Prompt the sender on its first send to each receiver.** The answer is stored in the sender's grants. | Data leaving an app is what needs consent. No manifest fields, and receivers stay simple. |
 | Prompt spoofing | **The in-window prompt band is enough** | A fake prompt drawn by the app can't grant anything: grants exist only in the runtime. The worst case is a confusing UI, not a privilege escalation. A separate window would add code and focus quirks on Wayland. |

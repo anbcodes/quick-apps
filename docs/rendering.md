@@ -79,11 +79,39 @@ scrolling, an indeterminate progress bar). The text caret does not blink, so a
 focused input costs nothing while idle. Otherwise the
 process sleeps in `poll()`.
 
+## macOS platform
+
+The Mac window is an `NSWindow` with one layer-backed `NSView`, driven through a
+small Objective-C file (`platform/macos/shim.m`) that `build.rs` compiles with
+`clang`. Rust sees plain C functions and a queue of event structs, never an
+Objective-C object. There are no crates.
+
+- **Drawing.** The frame is the runtime's own ARGB buffer. `present` copies it
+  into a `CGImage` and sets it as the layer's contents, so the system draws the
+  title bar, shadow and fullscreen. The window is Retina-aware: sizes are in
+  physical pixels and the scale is `backingScaleFactor`.
+- **Waiting.** Window events can't be polled with a file descriptor, so
+  `Platform::wait` replaces the `poll()` call. The Mac version registers the
+  loop's descriptors as `CFFileDescriptor` run loop sources and blocks in
+  `nextEventMatchingMask`; when a descriptor becomes readable its callback posts
+  an application-defined event to wake it. A frame timer (16 ms) stands in for
+  Wayland's frame callback.
+- **Keys.** Command acts as Ctrl, so Cmd+C, V, X, A and Z work as they do on
+  Linux. Option+arrow moves by word, Cmd+Left and Cmd+Right go to the ends.
+  Cmd+Q and Cmd+W send the same close request as the red button. Text comes from
+  `NSEvent.characters`, so dead keys and input methods (which need
+  `NSTextInputClient`) aren't supported yet.
+- **Waking from other threads.** `sys::new_wake` is an `eventfd` on Linux and a
+  kqueue with an `EVFILT_USER` event on macOS. Both poll as one descriptor.
+- **Known gaps.** While the user drags a window edge, Cocoa runs its own loop and
+  the window isn't redrawn until the drag ends.
+
 ## Platform trait
 
 ```rust
 pub trait Platform {
     fn fd(&self) -> RawFd;                          // polled by the main loop
+    fn wait(&mut self, extra: &[RawFd], ms: i32);   // sleep until input, an extra fd or the timeout
     fn dispatch(&mut self, out: &mut Vec<PEvent>);  // input, resize, close, frame done, paste
     fn frame(&mut self) -> Frame<'_>;               // &mut [u32] pixels, w, h, stride, age
     fn present(&mut self, damage: &[Rect]);

@@ -3,7 +3,7 @@
 use crate::gfx::glyph::GlyphCache;
 use crate::gfx::raster::Canvas;
 use crate::gfx::{render, Cmd, Color, NoPixmaps, RectF};
-use crate::platform::wayland::Wayland;
+use crate::platform::Native;
 use crate::platform::{PEvent, Platform, Rect};
 use crate::text::{self, FontId, Fonts};
 
@@ -153,7 +153,7 @@ pub fn run() -> i32 {
     let mono = fonts.find_first(text::DEFAULT_MONO).unwrap_or(sans);
     let f = DemoFonts { sans, bold, mono };
 
-    let mut p = match Wayland::connect("Quick Apps demo", "qa-demo") {
+    let mut p = match Native::connect("Quick Apps demo", "qa-demo") {
         Ok(p) => p,
         Err(e) => {
             eprintln!("qa: {e}");
@@ -196,9 +196,7 @@ pub fn run() -> i32 {
             }
         }
         p.flush();
-        let mut pfd = libc::pollfd { fd: p.fd(), events: libc::POLLIN, revents: 0 };
-        let r = unsafe { libc::poll(&mut pfd, 1, -1) };
-        if r < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+        if !p.wait(&[], -1) {
             return 1;
         }
         p.dispatch(&mut evs);

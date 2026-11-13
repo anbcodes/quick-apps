@@ -21,8 +21,14 @@ const INBOX_MAX_MSGS: usize = 100;
 const INBOX_MAX_BYTES: u64 = 4 << 20;
 
 pub fn sock_dir() -> PathBuf {
-    let rt = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-    rt.join("quick-apps")
+    // The temp folder differs between a terminal and a launched app, and sockets have short paths.
+    #[cfg(target_os = "macos")]
+    return PathBuf::from(format!("/tmp/quick-apps-{}", unsafe { libc::getuid() }));
+    #[cfg(not(target_os = "macos"))]
+    {
+        let rt = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+        rt.join("quick-apps")
+    }
 }
 
 pub fn sock_path(id: &str) -> PathBuf {
@@ -124,7 +130,7 @@ pub struct Net {
 impl Net {
     /// `listen` binds the app's socket (single instance and incoming messages).
     pub fn new(ctx: &AppCtx, listen: bool) -> Net {
-        let efd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+        let efd = crate::sys::new_wake();
         let mut n = Net {
             me: ctx.source.clone(),
             efd,
@@ -155,8 +161,7 @@ impl Net {
     }
 
     fn wake(efd: RawFd) {
-        let one = 1u64;
-        unsafe { libc::write(efd, &one as *const u64 as *const _, 8) };
+        crate::sys::wake(efd);
     }
 
     fn start_http(&mut self, id: u32, req: http::Req) {
@@ -251,7 +256,7 @@ impl Services for Net {
         let headers: Vec<(String, String)> =
             r.str().unwrap_or("").lines().filter_map(|l| l.split_once(':').map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))).collect();
         let (tx, rx) = mpsc::channel();
-        let wake = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+        let wake = crate::sys::new_wake();
         self.ws.insert(id, (tx, wake));
         let (done, efd) = (self.done.clone(), self.efd);
         std::thread::spawn(move || {
@@ -301,7 +306,7 @@ impl Services for Net {
         }
         let url = url.to_string();
         std::thread::spawn(move || {
-            let _ = std::process::Command::new("xdg-open").arg(&url).stdin(std::process::Stdio::null()).status();
+            let _ = std::process::Command::new(if cfg!(target_os = "macos") { "open" } else { "xdg-open" }).arg(&url).stdin(std::process::Stdio::null()).status();
         });
     }
 
@@ -314,8 +319,7 @@ impl Services for Net {
     }
 
     fn poll(&mut self) -> Vec<Vec<u8>> {
-        let mut n = 0u64;
-        unsafe { libc::read(self.efd, &mut n as *mut u64 as *mut _, 8) };
+        crate::sys::drain(self.efd);
         self.accept();
         while self.running.load(Ordering::SeqCst) < MAX_HTTP {
             let Some((id, r)) = self.queue.pop_front() else { break };

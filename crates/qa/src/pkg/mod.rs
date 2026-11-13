@@ -1,5 +1,7 @@
 //! App identity and on-disk layout (docs/packaging.md).
 
+#[cfg(target_os = "macos")]
+pub mod macapp;
 pub mod json;
 pub mod sha256;
 pub mod store;

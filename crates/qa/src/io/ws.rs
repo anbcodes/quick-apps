@@ -49,7 +49,7 @@ fn frame(op: u8, data: &[u8]) -> Vec<u8> {
         f.extend_from_slice(&(n as u64).to_be_bytes());
     }
     let mut mask = [0u8; 4];
-    unsafe { libc::getrandom(mask.as_mut_ptr() as *mut _, 4, 0) };
+    crate::sys::random(&mut mask);
     f.extend_from_slice(&mask);
     f.extend(data.iter().enumerate().map(|(i, b)| b ^ mask[i % 4]));
     f
@@ -79,7 +79,7 @@ pub fn run(url: &str, headers: &[(String, String)], rx: Receiver<WsOut>, wake_fd
         let u = Url::parse(url)?;
         let mut s = connect(&u, Duration::from_secs(30))?;
         let mut key = [0u8; 16];
-        unsafe { libc::getrandom(key.as_mut_ptr() as *mut _, 16, 0) };
+        crate::sys::random(&mut key);
         let mut head = format!(
             "GET {} HTTP/1.1\r\nHost: {}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {}\r\nSec-WebSocket-Version: 13\r\n",
             u.path,
@@ -133,8 +133,7 @@ pub fn run(url: &str, headers: &[(String, String)], rx: Receiver<WsOut>, wake_fd
             ];
             unsafe { libc::poll(fds.as_mut_ptr(), 2, -1) };
             if fds[1].revents != 0 {
-                let mut n = 0u64;
-                unsafe { libc::read(wake_fd, &mut n as *mut u64 as *mut _, 8) };
+                crate::sys::drain(wake_fd);
             }
             if fds[0].revents == 0 {
                 continue;

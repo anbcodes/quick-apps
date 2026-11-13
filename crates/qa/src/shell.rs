@@ -3,7 +3,7 @@
 use crate::gfx::glyph::GlyphCache;
 use crate::gfx::raster::Canvas;
 use crate::gfx::{render, PixmapSource, RectF};
-use crate::platform::wayland::Wayland;
+use crate::platform::Native;
 use crate::platform::{PEvent, Platform, Rect};
 use crate::ui::{Ui, UiEvent};
 use std::collections::VecDeque;
@@ -55,37 +55,31 @@ pub trait Driver {
 
 /// Watches the theme files so a change restyles the window (docs/theming.md).
 struct ThemeWatch {
+    w: crate::sys::Watcher,
     fd: RawFd,
 }
 
 impl ThemeWatch {
     fn new() -> ThemeWatch {
-        let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
-        let w = ThemeWatch { fd };
         let _ = std::fs::create_dir_all(crate::ui::theme::config_dir());
-        w.add_watches();
-        w
+        let w = crate::sys::Watcher::new();
+        let t = ThemeWatch { fd: w.fd(), w };
+        t.add_watches();
+        t
     }
 
     fn add_watches(&self) {
         let dir = crate::ui::theme::config_dir();
-        let mask = libc::IN_CLOSE_WRITE | libc::IN_MOVED_TO | libc::IN_CREATE | libc::IN_DELETE | libc::IN_ATTRIB;
         for d in [dir.clone(), dir.join("themes"), dir.join("apps")] {
-            if let Ok(c) = std::ffi::CString::new(d.as_os_str().as_encoded_bytes()) {
-                unsafe { libc::inotify_add_watch(self.fd, c.as_ptr(), mask) };
-            }
+            self.w.add(&d, false);
         }
     }
 
     /// True when something changed since the last call.
     fn changed(&self) -> bool {
-        let mut buf = [0u8; 4096];
-        let mut any = false;
-        while unsafe { libc::read(self.fd, buf.as_mut_ptr() as *mut _, buf.len()) } > 0 {
-            any = true;
-        }
+        let any = self.w.changed();
         if any {
-            // themes/ or apps/ may have just been created.
+            // themes/ or apps/ may have just been created, or a file replaced.
             self.add_watches();
         }
         any
@@ -107,14 +101,10 @@ pub fn merge(rects: &mut Vec<Rect>) {
     }
 }
 
-fn now_ms() -> u64 {
-    let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
-    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
-    ts.tv_sec as u64 * 1000 + ts.tv_nsec as u64 / 1_000_000
-}
+use crate::sys::now_ms;
 
 pub struct Shell {
-    pub p: Wayland,
+    pub p: Native,
     pub ui: Ui,
     cache: GlyphCache,
     ocache: GlyphCache,
@@ -133,7 +123,7 @@ const TITLE_BAR: f32 = 32.0;
 const EDGE: f32 = 6.0;
 
 impl Shell {
-    pub fn new(p: Wayland, ui: Ui) -> Shell {
+    pub fn new(p: Native, ui: Ui) -> Shell {
         Shell {
             p,
             ui,
@@ -420,16 +410,10 @@ impl Shell {
                 self.draw(d);
             }
             self.p.flush();
-            let mut fds = vec![
-                libc::pollfd { fd: self.p.fd(), events: libc::POLLIN, revents: 0 },
-                libc::pollfd { fd: self.themes.fd, events: libc::POLLIN, revents: 0 },
-            ];
-            for fd in d.fds() {
-                fds.push(libc::pollfd { fd, events: libc::POLLIN, revents: 0 });
-            }
+            let mut fds = vec![self.themes.fd];
+            fds.extend(d.fds());
             let timeout = d.timeout_ms().unwrap_or(-1);
-            let r = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as _, timeout) };
-            if r < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+            if !self.p.wait(&fds, timeout) {
                 return 1;
             }
             self.p.dispatch(&mut evs);

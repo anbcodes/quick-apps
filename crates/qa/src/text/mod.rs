@@ -40,8 +40,8 @@ pub struct Fonts {
     pub fallback: Vec<FontId>,
 }
 
-pub const DEFAULT_SANS: &[&str] = &["DejaVuSans.ttf", "NotoSans-Regular.ttf", "LiberationSans-Regular.ttf"];
-pub const DEFAULT_SANS_BOLD: &[&str] = &["DejaVuSans-Bold.ttf", "NotoSans-Bold.ttf", "LiberationSans-Bold.ttf"];
+pub const DEFAULT_SANS: &[&str] = &["DejaVuSans.ttf", "NotoSans-Regular.ttf", "LiberationSans-Regular.ttf", "Arial.ttf"];
+pub const DEFAULT_SANS_BOLD: &[&str] = &["DejaVuSans-Bold.ttf", "NotoSans-Bold.ttf", "LiberationSans-Bold.ttf", "Arial Bold.ttf"];
 /// Tried in order for characters a style's font lacks (`font.fallback`
 /// overrides it with a comma-separated list).
 pub const DEFAULT_FALLBACK: &[&str] = &[
@@ -56,8 +56,10 @@ pub const DEFAULT_FALLBACK: &[&str] = &[
     "NotoSansCJK-Regular.otf",
     "DroidSansFallbackFull.ttf",
     "unifont.otf",
+    "Arial Unicode.ttf",
+    "Apple Symbols.ttf",
 ];
-pub const DEFAULT_MONO: &[&str] = &["DejaVuSansMono.ttf", "NotoSansMono-Regular.ttf", "LiberationMono-Regular.ttf"];
+pub const DEFAULT_MONO: &[&str] = &["DejaVuSansMono.ttf", "NotoSansMono-Regular.ttf", "LiberationMono-Regular.ttf", "Monaco.ttf", "Courier New.ttf"];
 
 fn mmap_file(path: &Path) -> io::Result<&'static [u8]> {
     use std::os::fd::AsRawFd;
@@ -87,6 +89,10 @@ fn font_dirs() -> Vec<PathBuf> {
         h.join(".local/share/fonts"),
         PathBuf::from("/usr/local/share/fonts"),
         PathBuf::from("/usr/share/fonts"),
+        h.join("Library/Fonts"),
+        PathBuf::from("/Library/Fonts"),
+        PathBuf::from("/System/Library/Fonts/Supplemental"),
+        PathBuf::from("/System/Library/Fonts"),
     ]
 }
 

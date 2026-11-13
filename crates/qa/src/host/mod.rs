@@ -123,7 +123,7 @@ fn mb(n: usize) -> String {
 
 impl WasmDriver {
     pub fn new(wasm: Vec<u8>, ctx: AppCtx) -> WasmDriver {
-        let efd = unsafe { libc::eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK) };
+        let efd = crate::sys::new_wake();
         let shared = Arc::new(Shared { win: Mutex::new([0.0; 3]), efd, name: ctx.name.clone(), stop: Default::default(), secrets: ctx.home.join("secrets") });
         let grants = Grants::load(ctx.grants_path());
         let mem_limit = grants.memory().map(|m| m as usize).unwrap_or(DEFAULT_MEM_LIMIT).max(DEFAULT_MEM_LIMIT);
@@ -166,8 +166,7 @@ impl WasmDriver {
             // Offline or a fetch error is silent.
             if let Ok(Some(m)) = crate::pkg::store::check_update(&ctx, Duration::from_secs(5)) {
                 let _ = tx.send(UpdateMsg::Available(m));
-                let one = 1u64;
-                unsafe { libc::write(efd, &one as *const u64 as *const _, 8) };
+                crate::sys::wake(efd);
             }
         });
         self.update_rx = Some(rx);
@@ -538,8 +537,7 @@ impl WasmDriver {
                                 Ok(()) => UpdateMsg::Ready,
                                 Err(e) => UpdateMsg::Failed(e),
                             });
-                            let one = 1u64;
-                            unsafe { libc::write(efd, &one as *const u64 as *const _, 8) };
+                            crate::sys::wake(efd);
                         });
                         self.update_rx = Some(rx);
                     }
@@ -727,8 +725,7 @@ impl Driver for WasmDriver {
     }
 
     fn poll(&mut self, ui: &mut Ui) {
-        let mut n = 0u64;
-        unsafe { libc::read(self.efd, &mut n as *mut u64 as *mut _, 8) };
+        crate::sys::drain(self.efd);
         loop {
             let Some(rx) = &self.rx else { break };
             match rx.try_recv() {

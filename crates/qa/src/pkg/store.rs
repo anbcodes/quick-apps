@@ -147,7 +147,7 @@ pub fn join_url(manifest_url: &str, rel: &str) -> String {
     format!("{base}/{rel}")
 }
 
-fn bundle_dir(ctx: &AppCtx) -> PathBuf {
+pub(super) fn bundle_dir(ctx: &AppCtx) -> PathBuf {
     ctx.home.join("bundle")
 }
 
@@ -356,18 +356,21 @@ fn home() -> PathBuf {
     PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
 }
 
+#[cfg(target_os = "linux")]
 fn applications_dir() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| home().join(".local/share")).join("applications")
 }
 
+#[cfg(target_os = "linux")]
 pub fn desktop_path(ctx: &AppCtx) -> PathBuf {
     applications_dir().join(format!("qa-{}.desktop", ctx.id))
 }
 
-fn exe() -> String {
+pub(super) fn exe() -> String {
     std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "qa".into())
 }
 
+#[cfg(target_os = "linux")]
 pub fn write_desktop(ctx: &AppCtx, m: &Manifest) -> Result<PathBuf, String> {
     let exe = exe();
     let clean = |s: &str| s.replace(['\n', '\r'], " ");
@@ -394,6 +397,7 @@ pub fn write_desktop(ctx: &AppCtx, m: &Manifest) -> Result<PathBuf, String> {
 /// Registers `qa open` as the handler for `qa:` links, so a web page can
 /// install an app with one click. Writes qa-open.desktop and makes it the
 /// default in ~/.config/mimeapps.list.
+#[cfg(target_os = "linux")]
 pub fn register_handler() -> Result<PathBuf, String> {
     let dir = applications_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -417,6 +421,7 @@ pub fn register_handler() -> Result<PathBuf, String> {
 }
 
 /// Sets `mime=entry` in the [Default Applications] group of a mimeapps.list.
+#[cfg(target_os = "linux")]
 fn set_default(list: &str, mime: &str, entry: &str) -> String {
     let line = format!("{mime}={entry}");
     let mut out = Vec::new();
@@ -450,6 +455,9 @@ fn set_default(list: &str, mime: &str, entry: &str) -> String {
     }
     out.join("\n") + "\n"
 }
+
+#[cfg(target_os = "macos")]
+pub use super::macapp::{desktop_path, register_handler, write_desktop};
 
 pub fn bin_dir() -> PathBuf {
     home().join(".local/bin")
@@ -508,7 +516,9 @@ pub fn command_owner(name: &str) -> Option<AppCtx> {
 }
 
 pub fn remove(ctx: &AppCtx, keep_data: bool) -> Result<(), String> {
-    let _ = std::fs::remove_file(desktop_path(ctx));
+    // A menu entry is a file on Linux and a folder (the .app) on macOS.
+    let entry = desktop_path(ctx);
+    let _ = if entry.is_dir() { std::fs::remove_dir_all(&entry) } else { std::fs::remove_file(&entry) };
     if let Some(c) = linked_command(ctx) {
         unlink_command_named(&c);
     }
@@ -607,6 +617,7 @@ mod t {
         assert_eq!(join_url("https://a.b/x/app.json", "n.zip"), "https://a.b/x/n.zip");
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn mimeapps() {
         let e = "x-scheme-handler/qa=qa-open.desktop\n";

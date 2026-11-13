@@ -14,8 +14,15 @@ pub const APPEND: u32 = 16;
 pub const EXCL: u32 = 32;
 
 const MAX_OPEN: usize = 64;
+#[cfg(target_os = "linux")]
 const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
+#[cfg(target_os = "linux")]
 const RESOLVE_BENEATH: u64 = 0x08;
+// macOS has no O_PATH; a read-only open is enough to stat or to use as a parent.
+#[cfg(target_os = "macos")]
+const O_PATH: i32 = libc::O_RDONLY;
+#[cfg(target_os = "linux")]
+const O_PATH: i32 = libc::O_PATH;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum HKind {
@@ -38,6 +45,7 @@ pub struct Fs {
     files: Vec<Option<Open>>,
 }
 
+#[cfg(target_os = "linux")]
 #[repr(C)]
 struct OpenHow {
     flags: u64,
@@ -64,6 +72,31 @@ pub fn valid(path: &str) -> bool {
     !path.starts_with('/') && !path.contains('\0') && path.split('/').all(|c| c != "..")
 }
 
+/// Without openat2, every step of the path is opened by hand and never follows a link. `valid`
+/// has already rejected `..` and absolute paths, so nothing can climb out of `dir`.
+#[cfg(target_os = "macos")]
+fn openat2(dir: RawFd, path: &str, flags: i32, mode: u32) -> Result<OwnedFd, i32> {
+    let parts: Vec<&str> = path.split('/').filter(|c| !c.is_empty() && *c != ".").collect();
+    let open1 = |at: RawFd, name: &str, fl: i32| -> Result<OwnedFd, i32> {
+        let c = CString::new(name).map_err(|_| err::INVALID)?;
+        let fd = unsafe { libc::openat(at, c.as_ptr(), fl | libc::O_CLOEXEC | libc::O_NOFOLLOW, mode as libc::c_uint) };
+        if fd < 0 {
+            return Err(last());
+        }
+        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+    };
+    let Some((leaf, dirs)) = parts.split_last() else {
+        return open1(dir, ".", flags);
+    };
+    let mut held: Option<OwnedFd> = None;
+    for d in dirs {
+        let at = held.as_ref().map_or(dir, |f| f.as_raw_fd());
+        held = Some(open1(at, d, libc::O_RDONLY | libc::O_DIRECTORY)?);
+    }
+    open1(held.as_ref().map_or(dir, |f| f.as_raw_fd()), leaf, flags)
+}
+
+#[cfg(target_os = "linux")]
 fn openat2(dir: RawFd, path: &str, flags: i32, mode: u32) -> Result<OwnedFd, i32> {
     let p = if path.is_empty() { "." } else { path };
     let c = CString::new(p).map_err(|_| err::INVALID)?;
@@ -75,6 +108,53 @@ fn openat2(dir: RawFd, path: &str, flags: i32, mode: u32) -> Result<OwnedFd, i32
         return Err(last());
     }
     Ok(unsafe { OwnedFd::from_raw_fd(fd as RawFd) })
+}
+
+/// The entries of an open directory as (kind, name): 0 file, 1 folder, 2 other.
+#[cfg(target_os = "linux")]
+fn read_names(fd: OwnedFd) -> Result<Vec<(u8, String)>, i32> {
+    let rd = std::fs::read_dir(format!("/proc/self/fd/{}", fd.as_raw_fd())).map_err(|_| err::IO)?;
+    Ok(rd
+        .flatten()
+        .map(|e| {
+            let k = match e.file_type() {
+                Ok(t) if t.is_file() => 0,
+                Ok(t) if t.is_dir() => 1,
+                _ => 2,
+            };
+            (k, e.file_name().to_string_lossy().into_owned())
+        })
+        .collect())
+}
+
+#[cfg(target_os = "macos")]
+fn read_names(fd: OwnedFd) -> Result<Vec<(u8, String)>, i32> {
+    let dir = unsafe { libc::fdopendir(fd.as_raw_fd()) };
+    if dir.is_null() {
+        return Err(err::IO);
+    }
+    // fdopendir owns the descriptor now and closedir closes it.
+    std::mem::forget(fd);
+    let mut out = Vec::new();
+    loop {
+        let e = unsafe { libc::readdir(dir) };
+        if e.is_null() {
+            break;
+        }
+        let e = unsafe { &*e };
+        let name = unsafe { std::ffi::CStr::from_ptr(e.d_name.as_ptr()) }.to_string_lossy().into_owned();
+        if name == "." || name == ".." {
+            continue;
+        }
+        let k = match e.d_type {
+            libc::DT_REG => 0,
+            libc::DT_DIR => 1,
+            _ => 2,
+        };
+        out.push((k, name));
+    }
+    unsafe { libc::closedir(dir) };
+    Ok(out)
 }
 
 /// Opens a directory path outside any handle (the runtime's own folders, granted folders).
@@ -268,7 +348,7 @@ impl Fs {
             HKind::File { .. } => return Err(err::INVALID),
             HKind::Dir { .. } => {
                 let (dir, _) = self.dir(h, path)?;
-                openat2(dir, path, libc::O_PATH, 0)?
+                openat2(dir, path, O_PATH, 0)?
             }
         };
         let mut st: libc::stat = unsafe { std::mem::zeroed() };
@@ -292,18 +372,7 @@ impl Fs {
     pub fn list(&self, h: i32, path: &str) -> Result<Vec<u8>, i32> {
         let (dir, _) = self.dir(h, path)?;
         let fd = openat2(dir, path, libc::O_RDONLY | libc::O_DIRECTORY, 0)?;
-        let rd = std::fs::read_dir(format!("/proc/self/fd/{}", fd.as_raw_fd())).map_err(|_| err::IO)?;
-        let mut items: Vec<(u8, String)> = rd
-            .flatten()
-            .map(|e| {
-                let k = match e.file_type() {
-                    Ok(t) if t.is_file() => 0,
-                    Ok(t) if t.is_dir() => 1,
-                    _ => 2,
-                };
-                (k, e.file_name().to_string_lossy().into_owned())
-            })
-            .collect();
+        let mut items = read_names(fd)?;
         items.sort_by(|a, b| a.1.cmp(&b.1));
         let mut out = Vec::new();
         for (k, n) in items {
@@ -323,7 +392,7 @@ impl Fs {
         if name.is_empty() || name == "." {
             return Err(err::INVALID);
         }
-        let pfd = openat2(dir, p, libc::O_PATH | libc::O_DIRECTORY, 0)?;
+        let pfd = openat2(dir, p, O_PATH | libc::O_DIRECTORY, 0)?;
         Ok((pfd, CString::new(name).map_err(|_| err::INVALID)?))
     }
 

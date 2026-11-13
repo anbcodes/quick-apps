@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds the website into site/dist: the landing page, install.sh, the
-# runtime binary, and the example apps packed as bundles.
+# runtime binaries, and the example apps packed as bundles.
 #
 #   site/build.sh [base-url]    (default http://localhost:8765)
 #   python3 -m http.server 8765 -d site/dist
@@ -39,9 +39,18 @@ echo "$apps" | while IFS='|' read -r slug name command desc; do
 	echo "packed $name $version"
 done
 
+# Runtimes for each system. The Mac ones come from site/build-mac.sh, which has to run
+# against a Mac, so a system without a binary here is left out of install.sh.
+sum() { if [ -f "$1" ]; then sha256sum "$1" | cut -d' ' -f1; else echo none; fi; }
 cp "$qa" "$out/qa-x86_64-linux"
-sha=$(sha256sum "$out/qa-x86_64-linux" | cut -d' ' -f1)
-sed -e "s|@BASE@|$base|g" -e "s|@SHA256@|$sha|g" "$root/site/install.sh" >"$out/install.sh"
+for t in x86_64-darwin aarch64-darwin; do
+	[ -f "$root/site/mac/qa-$t" ] && cp "$root/site/mac/qa-$t" "$out/qa-$t"
+done
+sed -e "s|@BASE@|$base|g" \
+	-e "s|@SHA256_X86_64_LINUX@|$(sum "$out/qa-x86_64-linux")|g" \
+	-e "s|@SHA256_X86_64_DARWIN@|$(sum "$out/qa-x86_64-darwin")|g" \
+	-e "s|@SHA256_AARCH64_DARWIN@|$(sum "$out/qa-aarch64-darwin")|g" \
+	"$root/site/install.sh" >"$out/install.sh"
 cp "$root/site/index.html" "$out/"
 [ -f "$root/examples/widgets/icon.png" ] && cp "$root/examples/widgets/icon.png" "$out/icon.png"
 echo "built $out for $base"

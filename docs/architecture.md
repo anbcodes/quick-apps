@@ -73,7 +73,7 @@ crates/qa/              the runtime binary
                         (decode, encode)
   src/text/             font index and loading, fallback fonts, shaping (cmap, advances, kern),
                         line breaking
-  src/platform/         Platform trait + wayland/ (wire.rs protocol, xkb.rs dlopen, mod.rs)
+  src/platform/         Platform trait + wayland/ (wire.rs protocol, xkb.rs dlopen, mod.rs) + macos/ (Cocoa shim)
   src/prompt/           runtime-owned overlays (prompt band, file picker) as a second native UI tree
   src/io/               http.rs, ws.rs, messages, inbox, open_url, URL mapping
   src/pkg/              store.rs (manifest, cache, updates, .desktop, pack), zip.rs, json.rs, sha256.rs

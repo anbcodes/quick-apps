@@ -4,7 +4,6 @@ use crate::gfx::{Cmd, PixmapSource};
 use crate::host::WasmDriver;
 use crate::shell::Driver;
 use crate::ui::{Ui, UiEvent};
-use std::ffi::CString;
 use std::os::fd::RawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -43,39 +42,22 @@ pub fn build(dir: &Path) -> Result<Vec<u8>, String> {
 pub struct Dev {
     dir: PathBuf,
     inner: WasmDriver,
-    ifd: RawFd,
+    watcher: crate::sys::Watcher,
     pending: Option<Instant>,
     build_error: Option<String>,
 }
 
-fn watch(ifd: RawFd, p: &Path, recursive: bool) {
-    let Ok(c) = CString::new(p.as_os_str().as_encoded_bytes()) else { return };
-    let mask = libc::IN_CLOSE_WRITE | libc::IN_CREATE | libc::IN_DELETE | libc::IN_MOVED_TO;
-    if unsafe { libc::inotify_add_watch(ifd, c.as_ptr(), mask) } < 0 {
-        return;
-    }
-    if recursive {
-        if let Ok(rd) = std::fs::read_dir(p) {
-            for e in rd.flatten() {
-                if e.file_type().is_ok_and(|t| t.is_dir()) {
-                    watch(ifd, &e.path(), true);
-                }
-            }
-        }
-    }
-}
-
 impl Dev {
     pub fn new(dir: PathBuf, wasm: Vec<u8>, name: &str, opts: &crate::shot::RunOpts) -> Dev {
-        let ifd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
-        watch(ifd, &dir.join("src"), true);
-        watch(ifd, &dir.join("assets"), true);
-        watch(ifd, &dir, false);
+        let watcher = crate::sys::Watcher::new();
+        watcher.add(&dir.join("src"), true);
+        watcher.add(&dir.join("assets"), true);
+        watcher.add(&dir, false);
         let ctx = crate::pkg::AppCtx::new(&format!("file://{}", dir.display()), name, Some(dir.clone()));
         let mut inner = WasmDriver::new(wasm, ctx);
         inner.dev = true;
         opts.apply(&mut inner, true);
-        Dev { dir, inner, ifd, pending: None, build_error: None }
+        Dev { dir, inner, watcher, pending: None, build_error: None }
     }
 
     fn rebuild(&mut self, ui: &mut Ui) {
@@ -97,7 +79,7 @@ impl Dev {
 impl Driver for Dev {
     fn fds(&self) -> Vec<RawFd> {
         let mut v = self.inner.fds();
-        v.push(self.ifd);
+        v.push(self.watcher.fd());
         v
     }
     fn timeout_ms(&mut self) -> Option<i32> {
@@ -117,18 +99,13 @@ impl Driver for Dev {
         self.inner.resize(ui, w, h, s);
     }
     fn poll(&mut self, ui: &mut Ui) {
-        let mut buf = [0u8; 4096];
-        let mut changed = false;
-        while unsafe { libc::read(self.ifd, buf.as_mut_ptr() as *mut _, buf.len()) } > 0 {
-            changed = true;
-        }
-        if changed {
+        if self.watcher.changed() {
             self.pending = Some(Instant::now());
         }
         if self.pending.is_some_and(|t| t.elapsed() >= DEBOUNCE) {
             self.pending = None;
             // New folders under src/ need watches too.
-            watch(self.ifd, &self.dir.join("src"), true);
+            self.watcher.add(&self.dir.join("src"), true);
             self.rebuild(ui);
         }
         self.inner.poll(ui);

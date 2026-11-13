@@ -54,7 +54,7 @@ limits), `fetch` (HTTPS), `inbox` (messages between apps). `qa demo` and
 
 ## v1 scope
 
-- Linux desktop on Wayland, with a CPU renderer.
+- Linux desktop on Wayland and macOS, with a CPU renderer.
 - The wasm engine is wasmi, a pure-Rust interpreter.
 - Apps are written in Rust (`no_std` + `alloc`) against `qa-sdk`.
 - All components are native and built into the runtime.
