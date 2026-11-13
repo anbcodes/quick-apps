@@ -258,6 +258,11 @@ pub struct Ui {
     pub ptr: (f32, f32),
     pub(crate) drag: Option<interact::Drag>,
     pub(crate) last_click: (u32, u64, u32),
+    /// Selected text in a text node: (node, anchor, caret) as byte offsets.
+    pub text_sel: Option<(u32, usize, usize)>,
+    /// A press on selectable text that may turn into a selection drag:
+    /// (node, offset, x, y).
+    pub(crate) text_press: Option<(u32, usize, f32, f32)>,
     scroll_to: Vec<u32>,
     /// The select whose popup list is open.
     pub open_select: u32,
@@ -326,6 +331,8 @@ impl Ui {
             ptr: (-1.0, -1.0),
             drag: None,
             last_click: (0, 0, 0),
+            text_sel: None,
+            text_press: None,
             scroll_to: Vec::new(),
             open_select: 0,
             popup_hl: -1,

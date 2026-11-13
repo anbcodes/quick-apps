@@ -32,6 +32,17 @@ fn err() -> io::Error {
     io::Error::last_os_error()
 }
 
+impl Drop for Conn {
+    /// Closing the socket makes the compositor destroy everything the
+    /// connection made, so the window goes away.
+    fn drop(&mut self) {
+        unsafe { libc::close(self.fd) };
+        for fd in self.in_fds.drain(..) {
+            unsafe { libc::close(fd) };
+        }
+    }
+}
+
 impl Conn {
     pub fn connect() -> io::Result<Conn> {
         if let Some(fd) = std::env::var("WAYLAND_SOCKET").ok().and_then(|s| s.parse::<i32>().ok()) {

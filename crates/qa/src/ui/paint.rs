@@ -314,6 +314,48 @@ impl Ui {
         }
     }
 
+    /// The x where a line's text starts, after alignment.
+    fn line_start(&self, ts: TextStyle, inner: RectF, align: i32, line: &str) -> f32 {
+        let lw = self.fonts.measure(ts.font, ts.size, line);
+        match align {
+            1 => inner.x + (inner.w - lw) / 2.0,
+            2 => inner.x + inner.w - lw,
+            _ => inner.x,
+        }
+    }
+
+    /// The byte offset in text node `id` nearest to logical point (x, y).
+    pub fn text_index_at(&mut self, id: u32, x: f32, y: f32) -> usize {
+        let n = &self.nodes[&id];
+        let (r, pad) = (n.rect, n.edges(prop::PAD));
+        let style = n.s(prop::text::STYLE).to_string();
+        let align = n.i(prop::text::TEXT_ALIGN, 0);
+        let ts = self.text_style(id, &style);
+        let inner = RectF::new(r.x + pad[3], r.y + pad[0], (r.w - pad[1] - pad[3]).max(0.0), (r.h - pad[0] - pad[2]).max(0.0));
+        let lines = self.text_lines_pub(id, inner.w);
+        let text = self.nodes[&id].s(prop::text::TEXT).to_string();
+        let li = ((y - inner.y) / ts.line_h).floor();
+        if li < 0.0 || lines.is_empty() {
+            return 0;
+        }
+        let Some(&(a, b)) = lines.get(li as usize) else { return text.len() };
+        let line = &text[a..b];
+        let mut cx = self.line_start(ts, inner, align, line);
+        let mut prev = None;
+        for (i, ch) in line.char_indices() {
+            if ch == '\n' || ch == '\r' {
+                return a + i;
+            }
+            let adv = self.fonts.advance(ts.font, ts.size, prev, ch);
+            if x < cx + adv / 2.0 {
+                return a + i;
+            }
+            cx += adv;
+            prev = Some(ch);
+        }
+        b
+    }
+
     /// The link span under logical point (x, y) in text node `id`.
     pub fn link_at(&mut self, id: u32, x: f32, y: f32) -> Option<u32> {
         let spans = self.spans(id);
@@ -491,10 +533,28 @@ impl Ui {
         let clip = wrap == 2 || inner.h + 0.5 < lines.len() as f32 * ts.line_h;
         let old = if clip { Some(p.clip(r, 0.0)) } else { None };
         let nlines = lines.len();
+        let sel = self.text_sel.filter(|t| t.0 == id).map(|(_, x, y)| (x.min(y), x.max(y))).filter(|(x, y)| x < y);
+        let sel_c = self.color(id, &["color.selection"]);
         for (i, (a, b)) in lines.into_iter().enumerate() {
             let top = inner.y + i as f32 * ts.line_h;
             if top > p.dmg.y + p.dmg.h || top + ts.line_h < p.dmg.y {
                 continue;
+            }
+            if let Some((s0, s1)) = sel.filter(|&(s0, s1)| s0 <= b && s1 > a) {
+                let line = &text[a..b];
+                let x0 = self.line_start(ts, inner, align, line);
+                let (lo, hi) = (super::interact::floor_char(line, s0.max(a) - a), super::interact::floor_char(line, s1.min(b) - a));
+                let xa = x0 + self.fonts.measure(ts.font, ts.size, &line[..lo]);
+                let mut xb = x0 + self.fonts.measure(ts.font, ts.size, &line[..hi]);
+                if s1 > b {
+                    // The selection runs on past this line.
+                    xb += ts.size / 3.0;
+                }
+                let xa = xa.max(inner.x);
+                let xb = xb.min(inner.x + inner.w);
+                if xb > xa {
+                    p.fill(RectF::new(xa, top, xb - xa, ts.line_h), sel_c, 0.0);
+                }
             }
             let mut s = &text[a..b];
             let owned;

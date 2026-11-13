@@ -21,8 +21,8 @@ about 15 MB RSS for the counter window, 0 CPU ticks while idle.
 
 These are described elsewhere in the docs but the code does less:
 
-- **Text:** `selectable` text (prop 24) and `tooltip` (prop 15) are stored but
-  do nothing. GPOS kerning is not read (only the `kern` table). Fonts
+- **Text:** `tooltip` (prop 15) is stored but does nothing. A text selection
+  stays inside one text node. GPOS kerning is not read (only the `kern` table). Fonts
   with only color bitmaps (most emoji fonts) are skipped as fallbacks, so
   color emoji don't draw.
 - **Memory budget:** only wasm linear memory is counted. Host-side buffers

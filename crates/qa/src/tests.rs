@@ -588,3 +588,75 @@ fn sandbox_json_secrets_and_tags() {
     assert!(log.contains("secret: set -> ok, read back: s3cret\tvalue, removed: yes"), "{log}");
     assert!(log.contains("utc offset: "), "{log}");
 }
+
+#[test]
+fn text_selects_by_default_and_copies() {
+    use crate::platform::BUTTON_LEFT;
+    use qa_proto::{kind, prop, Sink, Value};
+    let mut ui = ui();
+    let mut p = Vec::new();
+    p.op_create(1, kind::GRID);
+    p.op_create(2, kind::TEXT);
+    p.op_set(2, prop::text::TEXT);
+    p.value(&Value::Str("hello brave world"));
+    // A clickable row holding text, and text that opted out.
+    p.op_create(3, kind::GRID);
+    p.op_set(3, prop::grid::CLICKABLE);
+    p.value(&Value::I32(1));
+    p.op_create(4, kind::TEXT);
+    p.op_set(4, prop::text::TEXT);
+    p.value(&Value::Str("row label"));
+    p.op_create(5, kind::TEXT);
+    p.op_set(5, prop::text::TEXT);
+    p.value(&Value::Str("not selectable"));
+    p.op_set(5, prop::text::SELECTABLE);
+    p.value(&Value::I32(0));
+    p.op_append(3, 4);
+    for c in [2, 3, 5] {
+        p.op_append(1, c);
+    }
+    p.op_root(1);
+    ui.apply_patch(&p).unwrap();
+    settle(&mut ui);
+    let r = ui.node(2).unwrap().rect;
+    let y = r.y + r.h / 2.0;
+
+    // Drag from the start across most of the text.
+    ui.pointer_button(BUTTON_LEFT, true, r.x + 1.0, y);
+    ui.pointer_move(r.x + 40.0, y);
+    ui.pointer_move(r.x + 400.0, y);
+    ui.pointer_button(BUTTON_LEFT, false, r.x + 400.0, y);
+    assert_eq!(ui.selected_text().as_deref(), Some("hello brave world"));
+    ui.key(0x63, "c", crate::ui::edit::CTRL);
+    assert_eq!(ui.clipboard_out.take().as_deref(), Some("hello brave world"));
+
+    // Double-click selects a word; a click elsewhere clears it.
+    let ts = ui.text_style(2, "");
+    let wx = r.x + ui.fonts.measure(ts.font, ts.size, "hello br");
+    for _ in 0..2 {
+        ui.pointer_button(BUTTON_LEFT, true, wx, y);
+        ui.pointer_button(BUTTON_LEFT, false, wx, y);
+    }
+    assert_eq!(ui.selected_text().as_deref(), Some("brave"));
+
+    // A plain click on text in a clickable row clicks it; a drag selects instead.
+    let rr = ui.node(4).unwrap().rect;
+    let ry = rr.y + rr.h / 2.0;
+    ui.pointer_button(BUTTON_LEFT, true, rr.x + 2.0, ry);
+    ui.pointer_button(BUTTON_LEFT, false, rr.x + 2.0, ry);
+    assert!(ui.selected_text().is_none());
+    assert!(ui.take_events().iter().any(|e| matches!(e, UiEvent::Click(3))));
+    ui.pointer_button(BUTTON_LEFT, true, rr.x + 1.0, ry);
+    ui.pointer_move(rr.x + 300.0, ry);
+    ui.pointer_button(BUTTON_LEFT, false, rr.x + 300.0, ry);
+    assert_eq!(ui.selected_text().as_deref(), Some("row label"));
+    assert!(!ui.take_events().iter().any(|e| matches!(e, UiEvent::Click(3))));
+
+    // Opted out: a drag does nothing.
+    let nr = ui.node(5).unwrap().rect;
+    let ny = nr.y + nr.h / 2.0;
+    ui.pointer_button(BUTTON_LEFT, true, nr.x + 1.0, ny);
+    ui.pointer_move(nr.x + 300.0, ny);
+    ui.pointer_button(BUTTON_LEFT, false, nr.x + 300.0, ny);
+    assert!(ui.selected_text().is_none());
+}

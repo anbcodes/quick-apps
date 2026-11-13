@@ -13,6 +13,29 @@ pub(crate) enum Drag {
     Thumb(u32, f32),
     /// Pointer captured by a canvas.
     Canvas(u32),
+    /// Selecting text in a text node.
+    Text(u32),
+}
+
+/// How far the pointer moves before a press on text becomes a selection.
+const DRAG_SLOP: f32 = 4.0;
+
+/// The largest char boundary in `s` at or before `i`.
+pub(crate) fn floor_char(s: &str, i: usize) -> usize {
+    let mut i = i.min(s.len());
+    while !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// The word around byte offset `i`.
+fn word_at(s: &str, i: usize) -> (usize, usize) {
+    let i = floor_char(s, i);
+    let is_word = super::edit::is_word;
+    let a = s[..i].char_indices().rev().take_while(|(_, c)| is_word(*c)).last().map_or(i, |(j, _)| j);
+    let b = s[i..].char_indices().find(|(_, c)| !is_word(*c)).map_or(s.len(), |(j, _)| i + j);
+    (a, b)
 }
 
 fn now_ms() -> u64 {
@@ -94,6 +117,7 @@ impl Ui {
             self.damage_node(t);
         }
         let cursor = match self.nodes.get(&t) {
+            None if self.selectable_text_at(x, y).is_some() => Cursor::Text,
             Some(n) if n.disabled() => Cursor::Default,
             Some(n) if n.kind == kind::INPUT => Cursor::Text,
             Some(n) if n.kind == kind::CANVAS => Cursor::Default,
@@ -157,7 +181,32 @@ impl Ui {
                 self.canvas_pointer(id, 2, x, y, 0.0, 0.0);
                 return;
             }
+            Some(Drag::Text(id)) => {
+                if let Some((sid, anchor, _)) = self.text_sel.filter(|s| s.0 == id) {
+                    let i = self.text_index_at(id, x, y);
+                    self.text_sel = Some((sid, anchor, i));
+                    self.damage_node(id);
+                }
+                self.cursor = Cursor::Text;
+                return;
+            }
             None => {}
+        }
+        if let Some((id, i, px, py)) = self.text_press {
+            if (x - px).abs() > DRAG_SLOP || (y - py).abs() > DRAG_SLOP {
+                // The press becomes a selection, so it won't click, and
+                // doesn't count toward a double-click.
+                self.text_press = None;
+                self.last_click = (0, 0, 0);
+                let p = std::mem::take(&mut self.press);
+                self.damage_node(p);
+                let j = self.text_index_at(id, x, y);
+                self.text_sel = Some((id, i, j));
+                self.drag = Some(Drag::Text(id));
+                self.damage_node(id);
+                self.cursor = Cursor::Text;
+                return;
+            }
         }
         self.update_hover(x, y);
         if let Some(n) = self.nodes.get(&self.hover) {
@@ -256,6 +305,32 @@ impl Ui {
                     }
                 }
             }
+            if let Some((old, ..)) = self.text_sel.take() {
+                self.damage_node(old);
+            }
+            self.text_press = None;
+            if button == BUTTON_LEFT {
+                if let Some(tn) = self.selectable_text_at(x, y) {
+                    let i = self.text_index_at(tn, x, y);
+                    let now = now_ms();
+                    let (lid, lt, count) = self.last_click;
+                    let count = if lid == tn && now - lt < 400 { count + 1 } else { 1 };
+                    self.last_click = (tn, now, count);
+                    let text = self.nodes[&tn].s(prop::text::TEXT);
+                    match count {
+                        1 => self.text_press = Some((tn, i, x, y)),
+                        2 => {
+                            let (a, b) = word_at(text, i);
+                            self.text_sel = Some((tn, a, b));
+                        }
+                        _ => self.text_sel = Some((tn, 0, text.len())),
+                    }
+                    if count > 1 {
+                        self.drag = Some(Drag::Text(tn));
+                        self.damage_node(tn);
+                    }
+                }
+            }
             let t = self.target_at(x, y);
             if t == 0 {
                 if self.focus != 0 {
@@ -321,6 +396,12 @@ impl Ui {
             }
         } else {
             let drag = self.drag.take();
+            self.text_press = None;
+            if let Some(Drag::Text(_)) = drag {
+                self.press = 0;
+                self.update_hover(x, y);
+                return;
+            }
             if let Some(Drag::Canvas(id)) = drag {
                 self.canvas_pointer(id, 1, x, y, 0.0, 0.0);
                 self.press = 0;
@@ -346,6 +427,22 @@ impl Ui {
             }
             self.update_hover(x, y);
         }
+    }
+
+    /// The topmost selectable text node under (x, y).
+    pub(crate) fn selectable_text_at(&self, x: f32, y: f32) -> Option<u32> {
+        let path = self.hit_path(x, y);
+        let id = *path.last()?;
+        let n = &self.nodes[&id];
+        (n.kind == kind::TEXT && n.i(prop::text::SELECTABLE, 1) != 0 && !n.s(prop::text::TEXT).is_empty()).then_some(id)
+    }
+
+    /// The selected text, if any, clamped to the node's current text.
+    pub fn selected_text(&self) -> Option<String> {
+        let (id, a, b) = self.text_sel?;
+        let text = self.nodes.get(&id)?.s(prop::text::TEXT);
+        let (a, b) = (floor_char(text, a.min(b)), floor_char(text, a.max(b)));
+        (a < b).then(|| text[a..b].to_string())
     }
 
     /// Clicks a button, clickable grid, checkbox or select.
@@ -453,6 +550,13 @@ impl Ui {
         if self.open_select != 0 {
             self.select_popup_key(sym);
             return;
+        }
+        let input_focused = self.nodes.get(&self.focus).is_some_and(|n| n.kind == kind::INPUT);
+        if ctrl && (sym == 0x63 || sym == 0x43) && !input_focused {
+            if let Some(s) = self.selected_text() {
+                self.clipboard_out = Some(s);
+                return;
+            }
         }
         let f = self.focus;
         if f != 0 && self.nodes.contains_key(&f) && !self.nodes[&f].disabled() {

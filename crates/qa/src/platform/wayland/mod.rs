@@ -126,6 +126,22 @@ fn cvt(r: i32) -> io::Result<i32> {
     }
 }
 
+impl Drop for Wayland {
+    fn drop(&mut self) {
+        for b in std::mem::take(&mut self.bufs) {
+            unsafe {
+                libc::munmap(b.ptr as *mut _, b.cap);
+                libc::close(b.fd);
+            }
+        }
+        unsafe {
+            libc::close(self.epfd);
+            libc::close(self.timerfd);
+            libc::close(self.paste_efd);
+        }
+    }
+}
+
 impl Wayland {
     pub fn connect(title: &str, app_id: &str) -> io::Result<Wayland> {
         let c = Conn::connect()?;

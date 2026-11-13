@@ -31,6 +31,7 @@ options:
 
 steps (run in order; each waits for the app to settle):
   click:<text>        click the button, link, tab or node showing <text>
+  select:<text>       drag-select <text> inside a text node
   type:<text>         type into the focused input
   key:<name>          Enter, Tab, Escape, Backspace, Up, Down, Left, Right,
                       PageUp, PageDown, Home, End, a letter; prefix ctrl+ / shift+
@@ -192,6 +193,42 @@ impl Run {
         None
     }
 
+    /// A point where a press lands at byte offset `at` of a text node.
+    fn index_point(&mut self, id: u32, at: usize) -> Option<(f32, f32)> {
+        let r = self.ui.nodes[&id].rect;
+        let mut y = r.y + 2.0;
+        while y < r.y + r.h {
+            let mut x = r.x;
+            while x < r.x + r.w + 2.0 {
+                if self.ui.text_index_at(id, x, y) == at {
+                    return Some((x, y));
+                }
+                x += 1.0;
+            }
+            y += 4.0;
+        }
+        None
+    }
+
+    /// Selects `want` in the first text node that contains it, by dragging.
+    fn select(&mut self, want: &str) -> Result<(), String> {
+        let order = tree_order(&self.ui);
+        let (id, at) = order
+            .iter()
+            .filter(|id| self.ui.nodes[id].kind == kind::TEXT)
+            .find_map(|&id| self.ui.nodes[&id].s(prop::text::TEXT).find(want).map(|i| (id, i)))
+            .ok_or(format!("select: no text contains {want:?}"))?;
+        let a = self.index_point(id, at).ok_or("select: can't find where the text starts")?;
+        let b = self.index_point(id, at + want.len()).ok_or("select: can't find where the text ends")?;
+        let ui = &mut self.ui;
+        ui.pointer_move(a.0, a.1);
+        ui.pointer_button(crate::platform::BUTTON_LEFT, true, a.0, a.1);
+        ui.pointer_move((a.0 + b.0) / 2.0, b.1);
+        ui.pointer_move(b.0, b.1);
+        ui.pointer_button(crate::platform::BUTTON_LEFT, false, b.0, b.1);
+        Ok(())
+    }
+
     /// A point over byte `at` of a text node, found by probing.
     fn link_point(&mut self, id: u32, at: usize) -> Option<(f32, f32)> {
         let r = self.ui.nodes[&id].rect;
@@ -220,6 +257,7 @@ impl Run {
                 let (x, y) = self.find(arg).ok_or(format!("click: nothing shows {arg:?}"))?;
                 self.click_at(x, y);
             }
+            "select" => self.select(arg)?,
             "type" => {
                 for ch in arg.chars() {
                     self.ui.key(ch as u32, &ch.to_string(), 0);

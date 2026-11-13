@@ -132,6 +132,7 @@ each followed by 300 ms for the app to settle:
 | Step | Does |
 |---|---|
 | `click:<text>` | Clicks the button, tab, checkbox, input (by placeholder), link span or text showing `<text>`; exact matches first, then substrings |
+| `select:<text>` | Drag-selects `<text>` inside the first text node that contains it |
 | `type:<text>` | Types into the focused input |
 | `key:<name>` | `Enter`, `Tab`, `Escape`, `Backspace`, `Up`, `Down`, `PageDown`, a letter …, with `ctrl+`, `shift+`, `alt+` prefixes |
 | `wait:<ms>` | Lets timers, requests and sockets run |

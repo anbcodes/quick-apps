@@ -51,7 +51,7 @@ pub enum EditResult {
     Paste,
 }
 
-fn is_word(c: char) -> bool {
+pub(crate) fn is_word(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 

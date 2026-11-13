@@ -34,7 +34,7 @@ selected `color.selection`. With an empty variant, nothing is drawn.
 | 21 | `wrap` | i32 | 0 word-wrap · 1 one line + ellipsis · 2 one line, clipped |
 | 22 | `style` | str | `"body"`; also `title`, `heading`, `caption`, `mono` |
 | 23 | `text_align` | i32 | 0 start · 1 center · 2 end |
-| 24 | `selectable` | i32 | 0. When 1: select with the mouse, copy with Ctrl+C. |
+| 24 | `selectable` | i32 | 1: drag to select, double-click for a word, triple-click for all of it, Ctrl+C to copy. 0 turns it off. |
 | 25 | `max_lines` | i32 | 0 (no limit). An ellipsis ends the last line. |
 | 26 | `spans` | bytes | Styled ranges: repeated `u32 start, u32 end, u8 flags, str variant`, with byte offsets into `text`. |
 
@@ -43,6 +43,11 @@ Span flags: 1 bold (synthetic, so widths and line breaks don't change),
 (`color.link` → `color.accent` and underlined; a click sends `Link`). Where
 spans overlap, flags combine and the last non-empty `variant` wins. The
 variant names a color token like the node's own (`accent` → `color.accent`).
+
+Selection stays inside one text node and is drawn with `color.selection`.
+A press on text inside a clickable grid or a link still clicks unless the
+pointer moves more than 4 px first, in which case it selects instead. Ctrl+C
+copies the selection unless an input has focus; the app doesn't see that key.
 
 Tokens: size `font.<style>.size`; weight `font.<style>.weight`; family
 `font.<style>.family` → `font.family`; color `color.V` (e.g. `muted`,
