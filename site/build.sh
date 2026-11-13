@@ -17,12 +17,12 @@ rm -rf "$out"
 mkdir -p "$out/apps"
 
 # slug|name|command|description
-apps='widgets|Widget Gallery|widgets|Every built-in component on two tabs: buttons, inputs, lists, tabs and images.
-slack|Slack|qa-slack|A small Slack client with threads, reactions and live updates. Needs a Slack token.
-counter|Counter|counter|A number and two buttons. The smallest useful app.
-fetch|Fetch|qa-fetch|Asks for internet access, then loads a GitHub repo over HTTPS and shows the JSON.
-sandbox|Sandbox|sandbox|Tries the things an app can'"'"'t do on its own: files, folders, network, memory and CPU.
-inbox|Inbox|inbox|Sends and receives messages between apps.'
+apps='widgets|Widget Gallery|widgets|Shows every built-in component: buttons, text fields, lists, tabs and images.
+slack|Slack|qa-slack|A small Slack client with threads and reactions. You'"'"'ll need a Slack token.
+counter|Counter|counter|A number and two buttons. The simplest app I could think of.
+fetch|Fetch|qa-fetch|Asks to use the internet, then loads a repo from the GitHub API and shows the JSON.
+sandbox|Sandbox|sandbox|Tries to do things apps aren'"'"'t allowed to do, so you can see what happens.
+inbox|Inbox|inbox|Sends messages to other apps and shows the ones it gets.'
 
 echo "$apps" | while IFS='|' read -r slug name command desc; do
 	src="$root/examples/$slug"

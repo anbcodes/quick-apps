@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Quick Apps</title>
-<meta name="description" content="Small desktop apps you install from a link.">
+<meta name="description" content="Small desktop apps you can install from a link.">
 <link rel="icon" href="icon.png">
 <style>
 :root {
@@ -85,61 +85,62 @@ button:hover, .btn:hover { filter: brightness(0.96); }
 .app p { font-size: 15px; flex: 1; margin: 0; }
 .app .meta { font-size: 13px; color: var(--muted); }
 .app .actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
-.points { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 16px; }
-.points p { font-size: 15px; color: var(--muted); }
 footer { border-top: 1px solid var(--line); margin-top: 64px; padding-top: 16px; font-size: 14px; color: var(--muted); }
 </style>
 </head>
 <body>
 <main>
   <h1>Quick Apps</h1>
-  <p class="lead">Small desktop apps you install from a link. Each app is a WebAssembly file, usually a few kilobytes,
-  that runs in its own sandbox and updates from the URL it came from.</p>
+  <p class="lead">Small desktop apps you can install from a link.</p>
 
+  <p>Quick Apps is a project I've been working on. The idea is that installing an app should be about as easy as
+  opening a website. You click a link, it asks if you want to install it, and then it shows up in your app menu like
+  any other program. The apps are pretty small too (the ones on this page are between 3 and 60 KB).</p>
+
+  <p>If you want to try it, run this in a terminal:</p>
   <div class="cmd">
     <pre><code id="install-cmd">curl -fsSL https://…/install.sh | sh</code></pre>
     <button type="button" data-copy="install-cmd">Copy</button>
   </div>
-  <p class="small muted">Linux (Wayland), x86_64. Puts one 4 MB binary at <code>~/.local/bin/qa</code> and makes
-  <code>qa:</code> links open with it. No root needed.</p>
+  <p class="small muted">This downloads a single program called <code>qa</code> and puts it in
+  <code>~/.local/bin</code>. Right now it only works on 64-bit Linux with Wayland (I use sway, so that's where it's
+  been tested the most).</p>
 
-  <h2>Try an app</h2>
-  <p class="muted">Install the runtime first, then click Install. Your browser asks once whether to open
-  <code>qa</code> links. After that, each app shows what it is and where it's from, and waits for you to confirm.</p>
+  <h2>Apps to try</h2>
+  <p class="muted">Here are a few apps I made while building it. Once qa is installed, the Install buttons should
+  work. The first time you click one, your browser will probably ask if it's ok to open <code>qa</code> links.</p>
   <div class="apps" id="apps"></div>
 
-  <h2>How it works</h2>
-  <div class="points">
-    <div>
-      <h3>A link is the installer</h3>
-      <p>An app is a manifest and a zip file on any static host. Installing adds it to your app menu and gives it
-      a command name in your terminal.</p>
-    </div>
-    <div>
-      <h3>Nothing by default</h3>
-      <p>Apps get their own folder and nothing else. Internet, other folders, and extra memory or CPU each need
-      your permission, asked by the runtime and not by the app.</p>
-    </div>
-    <div>
-      <h3>Updates from the source</h3>
-      <p>When an app starts, it checks its URL for a newer version and offers to update. The previous version
-      is kept, so <code>qa rollback</code> can go back.</p>
-    </div>
-  </div>
+  <h2>Why I made this</h2>
+  <p>I wanted something in between a website and an app. Websites are really easy to share, you just send someone a
+  link and they can use it right away. But they live in a browser tab, and they never really feel like part of your
+  computer. Apps do, but installing one usually takes more work, and once it's installed it can pretty much do
+  whatever it wants.</p>
+  <p>Quick Apps tries to get the good parts of both. You install an app from a link, and after that it acts like a
+  normal program. It has an icon in your app menu and a command you can run from a terminal.</p>
+  <p>Apps also can't do much on their own. Each one gets a folder for its own files and that's about it. If it wants
+  to use the internet, read other files, or use more memory, qa asks you first. (qa writes the question, not the
+  app, so an app can't word it in a misleading way.)</p>
+  <p>Updates come from wherever you installed the app. When an app starts, qa checks that link for a newer version,
+  and if an update breaks something, <code>qa rollback</code> goes back to the old one.</p>
 
-  <h2>Publish your own</h2>
-  <p>Write the app in Rust with <code>qa-sdk</code> (or any language that compiles to WebAssembly), then pack it:</p>
-<pre><code>qa dev ./notes              # build, run, reload on save
-qa pack ./notes --out dist  # writes notes-1.0.0.zip and app.json</code></pre>
-  <p>Upload both files anywhere that serves HTTPS and link to the manifest:</p>
+  <h2>Making your own</h2>
+  <p>Right now apps are written in Rust using <code>qa-sdk</code>. In theory anything that compiles to WebAssembly
+  would work, but Rust is the only language with a library so far.</p>
+  <p><code>qa dev</code> runs your app and reloads it whenever you save. When it's ready, <code>qa pack</code> builds
+  a zip and an <code>app.json</code>:</p>
+<pre><code>qa dev ./notes
+qa pack ./notes --out dist</code></pre>
+  <p>Then put both files on any web server and link to the <code>app.json</code>:</p>
 <pre><code>&lt;a href="qa:https://example.com/notes/app.json"&gt;Install Notes&lt;/a&gt;</code></pre>
-  <p>To set up the runtime and an app in one step, pass the manifest to the install script:</p>
+  <p>If someone doesn't have qa installed yet, you can give them this command instead. It installs qa and then
+  your app:</p>
   <div class="cmd">
     <pre><code id="install-app-cmd">curl -fsSL https://…/install.sh | sh -s -- https://example.com/notes/app.json</code></pre>
     <button type="button" data-copy="install-app-cmd">Copy</button>
   </div>
 
-  <footer>Quick Apps is in early development. Expect rough edges.</footer>
+  <footer>This is still pretty early, so expect some things to be broken.</footer>
 </main>
 
 <script>
