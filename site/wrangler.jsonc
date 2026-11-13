@@ -1,0 +1,9 @@
+// Serves site/dist as static files at qa.anb.codes.
+//   site/build.sh https://qa.anb.codes && npx wrangler deploy -c site/wrangler.jsonc
+{
+  "name": "quick-apps-site",
+  "account_id": "79d73bbcd0d98228abaa048eac36ca3c",
+  "compatibility_date": "2026-11-01",
+  "assets": { "directory": "./dist" },
+  "routes": [{ "pattern": "qa.anb.codes", "custom_domain": true }]
+}
