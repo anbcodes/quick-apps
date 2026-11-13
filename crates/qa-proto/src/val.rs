@@ -305,20 +305,10 @@ mod w {
     }
 
     pub fn json_into(out: &mut String, v: Val) {
-        use core::fmt::Write;
         match v.kind() {
             FALSE => out.push_str("false"),
             TRUE => out.push_str("true"),
-            NUM => {
-                let n = v.num();
-                if !n.is_finite() {
-                    out.push_str("null");
-                } else if n == (n as i64) as f64 && n.abs() < 1e15 {
-                    let _ = write!(out, "{}", n as i64);
-                } else {
-                    let _ = write!(out, "{}", n);
-                }
-            }
+            NUM => num_into(out, v.num()),
             STR => quote_into(out, v.str()),
             LIST => {
                 out.push('[');
@@ -343,6 +333,102 @@ mod w {
                 out.push('}');
             }
             _ => out.push_str("null"),
+        }
+    }
+
+    fn digits_into(out: &mut String, mut v: u64) {
+        let mut b = [0u8; 20];
+        let mut i = b.len();
+        loop {
+            i -= 1;
+            b[i] = b'0' + (v % 10) as u8;
+            v /= 10;
+            if v == 0 {
+                break;
+            }
+        }
+        for &c in &b[i..] {
+            out.push(c as char);
+        }
+    }
+
+    /// Appends a number as JSON, without `core::fmt` (which would add about
+    /// 20 KB to an app). Whole numbers are exact up to 1e15; others keep 15
+    /// significant digits.
+    pub fn num_into(out: &mut String, n: f64) {
+        if !n.is_finite() {
+            return out.push_str("null");
+        }
+        if n < 0.0 {
+            out.push('-');
+        }
+        let mut a = if n < 0.0 { -n } else { n };
+        if a < 1e15 && a == (a as u64) as f64 {
+            return digits_into(out, a as u64);
+        }
+        // Scale to 1 <= a < 10 and remember the power of ten.
+        let mut e = 0i32;
+        while a >= 1e16 {
+            a /= 1e16;
+            e += 16;
+        }
+        while a < 1e-15 {
+            a *= 1e16;
+            e -= 16;
+        }
+        while a >= 10.0 {
+            a /= 10.0;
+            e += 1;
+        }
+        while a < 1.0 {
+            a *= 10.0;
+            e -= 1;
+        }
+        let mut d = (a * 1e14 + 0.5) as u64;
+        if d >= 1_000_000_000_000_000 {
+            d /= 10;
+            e += 1;
+        }
+        let mut dig = [0u8; 15];
+        for i in (0..15).rev() {
+            dig[i] = b'0' + (d % 10) as u8;
+            d /= 10;
+        }
+        let mut len = 15;
+        while len > 1 && dig[len - 1] == b'0' {
+            len -= 1;
+        }
+        let dig = &dig[..len];
+        let put = |out: &mut String, b: &[u8]| b.iter().for_each(|&c| out.push(c as char));
+        if (-5..15).contains(&e) {
+            if e < 0 {
+                out.push_str("0.");
+                for _ in 0..(-e - 1) {
+                    out.push('0');
+                }
+                put(out, dig);
+            } else {
+                let whole = (e as usize + 1).min(len);
+                put(out, &dig[..whole]);
+                for _ in whole..(e as usize + 1) {
+                    out.push('0');
+                }
+                if len > whole {
+                    out.push('.');
+                    put(out, &dig[whole..]);
+                }
+            }
+        } else {
+            put(out, &dig[..1]);
+            if len > 1 {
+                out.push('.');
+                put(out, &dig[1..]);
+            }
+            out.push('e');
+            if e < 0 {
+                out.push('-');
+            }
+            digits_into(out, e.unsigned_abs() as u64);
         }
     }
 
@@ -522,6 +608,36 @@ mod w {
 #[cfg(all(test, feature = "alloc"))]
 mod tests {
     use super::*;
+    use alloc::string::String;
+
+    #[test]
+    fn numbers_print_without_fmt() {
+        let cases: &[(f64, &str)] = &[
+            (0.0, "0"),
+            (42.0, "42"),
+            (-7.0, "-7"),
+            (0.1, "0.1"),
+            (-2.5, "-2.5"),
+            (3.14159, "3.14159"),
+            (1234.5678, "1234.5678"),
+            (0.1 + 0.2, "0.3"),
+            (0.00012, "0.00012"),
+            (1e21, "1e21"),
+            (1.5e-9, "1.5e-9"),
+            (123456789012345.0, "123456789012345"),
+            (1e15, "1e15"),
+            (f64::NAN, "null"),
+        ];
+        for (n, want) in cases {
+            let mut s = String::new();
+            num_into(&mut s, *n);
+            assert_eq!(&s, want, "{n}");
+            if n.is_finite() {
+                let back: f64 = s.parse().unwrap();
+                assert!((back - n).abs() <= n.abs() * 1e-14, "{n} -> {s}");
+            }
+        }
+    }
 
     #[test]
     fn round_trip() {

@@ -310,6 +310,11 @@ impl Ui {
                 let uy = baseline + (m.descent * 0.4).max(th).round();
                 p.list.push(Cmd::Fill { rect: RectF::new(x0 + gx0, uy, gx1 - gx0, th), color: c, radius: 0.0 });
             }
+            if flags & span::STRIKE != 0 {
+                let th = (size / 14.0).round().max(1.0);
+                let sy = baseline - (m.ascent * 0.32).round();
+                p.list.push(Cmd::Fill { rect: RectF::new(x0 + gx0, sy, gx1 - gx0, th), color: c, radius: 0.0 });
+            }
             i = j;
         }
     }
@@ -629,7 +634,7 @@ impl Ui {
     fn paint_button(&mut self, p: &mut Paint, id: u32) {
         let r = self.nodes[&id].rect;
         let label = self.nodes[&id].s(prop::button::LABEL).to_string();
-        let disabled = self.nodes[&id].disabled();
+        let disabled = self.is_disabled(id);
         let (bg, fg, border) = self.button_colors(id);
         let radius = self.num(id, &["radius"], 6.0);
         p.fill(r, bg, radius);
@@ -774,7 +779,10 @@ impl Ui {
         let label = self.nodes[&id].s(prop::checkbox::LABEL).to_string();
         let ts = self.text_style(id, "body");
         let bs = (ts.size + 2.0).round();
-        let b = RectF::new(r.x + 1.0, r.y + ((r.h - bs) / 2.0).round(), bs, bs);
+        let lines = self.checkbox_lines(id, r.w);
+        // The box sits beside the first line.
+        let top = r.y + (r.h - lines.len().max(1) as f32 * ts.line_h) / 2.0;
+        let b = RectF::new(r.x + 1.0, (top + (ts.line_h - bs) / 2.0).round(), bs, bs);
         let radius = (self.num(id, &["radius"], 6.0) * 0.6).min(bs / 3.0);
         if checked {
             let c = self.color(id, &["color.accent"]);
@@ -788,14 +796,18 @@ impl Ui {
             let c = self.color(id, &["color.border"]);
             p.stroke(b, c, radius, 1.0);
         }
-        if self.hover == id && !self.nodes[&id].disabled() {
+        if self.hover == id && !self.is_disabled(id) {
             let c = self.color(id, &["color.hover"]);
             p.fill(b, c, radius);
         }
         if !label.is_empty() {
-            let fg = self.color(id, &["color.fg"]);
+            let v = self.nodes[&id].s(prop::VARIANT).to_string();
+            let fg = if v.is_empty() { self.color(id, &["color.fg"]) } else { self.color(id, &[&format!("color.{v}"), "color.fg"]) };
             let x = b.x + bs + 8.0;
-            self.draw_text(p, ts, fg, x, r.y + (r.h - ts.line_h) / 2.0, (r.x + r.w - x).max(0.0), Align::Start, &label, true);
+            let one_line = self.nodes[&id].i(prop::checkbox::WRAP, 0) != 0;
+            for (i, &(s, e)) in lines.iter().enumerate() {
+                self.draw_text(p, ts, fg, x, top + i as f32 * ts.line_h, (r.x + r.w - x).max(0.0), Align::Start, &label[s..e], one_line);
+            }
         }
         self.focus_ring(p, id, b, radius);
     }
@@ -843,7 +855,7 @@ impl Ui {
         self.draw_text(p, ts, c, inner.x, inner.y, inner.w - arrow_w, Align::Start, &txt, true);
         let mc = self.color(id, &["color.muted"]);
         self.draw_text(p, ts, mc, inner.x + inner.w - arrow_w, inner.y, arrow_w, Align::End, "▾", false);
-        if self.hover == id && !self.nodes[&id].disabled() {
+        if self.hover == id && !self.is_disabled(id) {
             let r = self.nodes[&id].rect;
             let c = self.color(id, &["color.hover"]);
             let radius = self.num(id, &["radius"], 6.0);

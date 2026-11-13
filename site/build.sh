@@ -20,6 +20,7 @@ mkdir -p "$out/apps"
 apps='widgets|Widget Gallery|widgets|Shows every built-in component: buttons, text fields, lists, tabs and images.
 slack|Slack|qa-slack|A small Slack client with threads and reactions. You'"'"'ll need a Slack token.
 counter|Counter|counter|A number and two buttons. The simplest app I could think of.
+todo|Todo|qa-todo|A todo list that saves itself. Double-click an item to edit it.
 fetch|Fetch|qa-fetch|Asks to use the internet, then loads a repo from the GitHub API and shows the JSON.
 sandbox|Sandbox|sandbox|Tries to do things apps aren'"'"'t allowed to do, so you can see what happens.
 inbox|Inbox|inbox|Sends messages to other apps and shows the ones it gets.'

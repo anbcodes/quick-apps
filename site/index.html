@@ -103,8 +103,8 @@ footer { border-top: 1px solid var(--line); margin-top: 64px; padding-top: 16px;
     <button type="button" data-copy="install-cmd">Copy</button>
   </div>
   <p class="small muted">This downloads a single program called <code>qa</code> and puts it in
-  <code>~/.local/bin</code>. It works on 64-bit Linux with Wayland (I use sway, so that's where it's
-  been tested the most) and on macOS. The Mac version is newer. I've tried it on an Intel Mac running macOS 15, but
+  <code>~/.local/bin</code>. It works on 64-bit Linux, with either Wayland or X11 (I use sway, so Wayland is where it's
+  been tested the most), and on macOS. The Mac version is newer. I've tried it on an Intel Mac running macOS 15, but
   the Apple silicon build hasn't been run on real hardware yet. Apps show up in Spotlight and Launchpad there.</p>
 
   <h2>Apps to try</h2>
@@ -146,7 +146,7 @@ qa pack ./notes --out dist</code></pre>
 
 <script>
 const here = new URL(".", location.href).href.replace(/\/$/, "");
-const apps = ["widgets", "slack", "counter", "fetch", "sandbox", "inbox"];
+const apps = ["widgets", "slack", "todo", "counter", "fetch", "sandbox", "inbox"];
 
 document.getElementById("install-cmd").textContent = `curl -fsSL ${here}/install.sh | sh`;
 document.getElementById("install-app-cmd").textContent =

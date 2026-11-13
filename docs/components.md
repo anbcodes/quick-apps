@@ -39,7 +39,8 @@ selected `color.selection`. With an empty variant, nothing is drawn.
 | 26 | `spans` | bytes | Styled ranges: repeated `u32 start, u32 end, u8 flags, str variant`, with byte offsets into `text`. |
 
 Span flags: 1 bold (synthetic, so widths and line breaks don't change),
-2 underline, 4 code (a `color.code_bg` → `color.surface` background), 16 link
+2 underline, 4 code (a `color.code_bg` → `color.surface` background),
+8 strikethrough, 16 link
 (`color.link` → `color.accent` and underlined; a click sends `Link`). Where
 spans overlap, flags combine and the last non-empty `variant` wins. The
 variant names a color token like the node's own (`accent` → `color.accent`).
@@ -110,7 +111,7 @@ never prompts.
 
 | Id | Prop | Type | Default |
 |---|---|---|---|
-| 20 | `value` | str | "". Replaces the text only if it differs. The cursor is clamped. |
+| 20 | `value` | str | "". Replaces the text only if it differs. The cursor is clamped, or goes to the end if the input was empty. |
 | 21 | `placeholder` | str | "" |
 | 22 | `multiline` | i32 | 0 |
 | 23 | `secret` | i32 | 0 (shows dots) |
@@ -128,10 +129,12 @@ Events: `Change`, `Submit`, `FocusOut`. Tokens: bg `input.bg` →
 | 20 | `label` | str | "" |
 | 21 | `checked` | i32 | 0 |
 | 22 | `disabled` | i32 | 0 |
+| 23 | `wrap` | i32 | 0 wraps the label onto more lines · 1 one line + ellipsis |
 
 It flips its own state right away and sends `Toggle`. The app can `SET
-checked` to override. Tokens: box `color.border`; checked fill
-`color.accent`; check mark `color.accent_fg`.
+checked` to override. Events: `Toggle`, `DoubleClick`. Tokens: box
+`color.border`; checked fill `color.accent`; check mark `color.accent_fg`;
+label `color.V` → `color.fg` (so `variant("muted")` dims a finished item).
 
 ## select (13)
 
@@ -176,7 +179,11 @@ Token: `color.border`.
 - **Focus.** Interactive components and `clickable` grids are focusable in
   tree order. The focus ring uses `color.focus`.
 - **Disabled.** A disabled node is drawn at 50% alpha, gets no focus and sends
-  no events.
+  no events. The common `disabled` prop ([ui-tree.md](ui-tree.md)) works on
+  any node and covers everything inside it; the per-kind `disabled` props
+  above still work.
+- **Double-click.** Buttons, checkboxes and clickable grids send
+  `DoubleClick` after the second of two quick clicks.
 - **Cursor shapes.** I-beam over inputs and selectable text, pointer over
   buttons and clickable grids.
 

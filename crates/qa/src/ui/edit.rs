@@ -58,8 +58,11 @@ pub(crate) fn is_word(c: char) -> bool {
 impl Edit {
     pub fn set_text(&mut self, s: &str) {
         if self.text != s {
+            // A value put into an empty input leaves the caret after it,
+            // ready for typing to carry on.
+            let was_empty = self.text.is_empty();
             self.text = s.to_string();
-            self.caret = self.caret.min(self.text.len());
+            self.caret = if was_empty { self.text.len() } else { self.caret.min(self.text.len()) };
             while !self.text.is_char_boundary(self.caret) {
                 self.caret -= 1;
             }

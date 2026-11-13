@@ -257,6 +257,11 @@ impl Run {
                 let (x, y) = self.find(arg).ok_or(format!("click: nothing shows {arg:?}"))?;
                 self.click_at(x, y);
             }
+            "dblclick" => {
+                let (x, y) = self.find(arg).ok_or(format!("dblclick: nothing shows {arg:?}"))?;
+                self.click_at(x, y);
+                self.click_at(x, y);
+            }
             "select" => self.select(arg)?,
             "type" => {
                 for ch in arg.chars() {

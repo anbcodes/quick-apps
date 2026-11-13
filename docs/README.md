@@ -23,7 +23,7 @@ cd examples/counter && cargo build --release --target wasm32-unknown-unknown
 cargo test --release                        # from the repo root; add -- --include-ignored for slow/network tests
 ```
 
-Examples: `counter`, `widgets` (every component), `sandbox` (files, prompts,
+Examples: `counter`, `todo` (a saved list with filters), `widgets` (every component), `sandbox` (files, prompts,
 limits), `fetch` (HTTPS), `inbox` (messages between apps). `qa demo` and
 `qa demo-todo` are native harnesses for the renderer and the UI tree.
 
@@ -54,7 +54,7 @@ limits), `fetch` (HTTPS), `inbox` (messages between apps). `qa demo` and
 
 ## v1 scope
 
-- Linux desktop on Wayland and macOS, with a CPU renderer.
+- Linux desktop (Wayland or X11) and macOS, with a CPU renderer.
 - The wasm engine is wasmi, a pure-Rust interpreter.
 - Apps are written in Rust (`no_std` + `alloc`) against `qa-sdk`.
 - All components are native and built into the runtime.
@@ -75,6 +75,7 @@ limits), `fetch` (HTTPS), `inbox` (messages between apps). `qa demo` and
 | [permissions.md](permissions.md) | Prompts, grants, memory and CPU limits |
 | [packaging.md](packaging.md) | Bundles, manifests, cache, updates, install, `qa:` links, commands, CLI, `qa dev` and `qa shot` |
 | [sdk.md](sdk.md) | The Rust SDK and a sample app |
+| [../sdks/README.md](../sdks/README.md) | SDKs for C, Zig, AssemblyScript and TinyGo |
 | [roadmap.md](roadmap.md) | Milestones, what is out of scope, settled decisions and why |
 
 ## Glossary

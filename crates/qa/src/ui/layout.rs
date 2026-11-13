@@ -401,6 +401,22 @@ impl Ui {
         lines
     }
 
+    /// A checkbox label's lines when the whole node is `w` wide.
+    pub(crate) fn checkbox_lines(&mut self, id: u32, w: f32) -> Vec<(usize, usize)> {
+        let ts = self.text_style(id, "body");
+        let n = &self.nodes[&id];
+        let label = n.s(prop::checkbox::LABEL);
+        if label.is_empty() {
+            return Vec::new();
+        }
+        if n.i(prop::checkbox::WRAP, 0) != 0 {
+            return vec![(0, label.len())];
+        }
+        // The box, its 1 px inset and the 8 px gap come off the width.
+        let avail = w - ((ts.size + 2.0).round() + 9.0);
+        crate::text::wrap(&self.fonts, ts.font, ts.size, label, avail.max(1.0))
+    }
+
     /// Children that aren't hidden.
     fn shown(&self, id: u32) -> Vec<u32> {
         self.nodes[&id].children.iter().copied().filter(|c| self.nodes[c].i(prop::HIDDEN, 0) == 0).collect()
@@ -507,7 +523,13 @@ impl Ui {
             }
             kind::CHECKBOX => {
                 let ts = self.text_style(id, "body");
-                ts.size + 4.0
+                let n = &self.nodes[&id];
+                let word = if n.i(prop::checkbox::WRAP, 0) == 0 {
+                    n.s(prop::checkbox::LABEL).split_whitespace().map(|w| self.fonts.measure(ts.font, ts.size, w)).fold(0.0, f32::max)
+                } else {
+                    0.0
+                };
+                ts.size + 4.0 + if word > 0.0 { 8.0 + word } else { 0.0 }
             }
             kind::TABS => {
                 let ts = self.text_style(id, "body");
@@ -626,7 +648,8 @@ impl Ui {
             }
             kind::CHECKBOX => {
                 let ts = self.text_style(id, "body");
-                ts.line_h.max(ts.size + 4.0)
+                let n = self.checkbox_lines(id, w).len().max(1);
+                (n as f32 * ts.line_h).max(ts.size + 4.0)
             }
             kind::TABS => {
                 let ts = self.text_style(id, "body");

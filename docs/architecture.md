@@ -73,7 +73,7 @@ crates/qa/              the runtime binary
                         (decode, encode)
   src/text/             font index and loading, fallback fonts, shaping (cmap, advances, kern),
                         line breaking
-  src/platform/         Platform trait + wayland/ (wire.rs protocol, xkb.rs dlopen, mod.rs) + macos/ (Cocoa shim)
+  src/platform/         Platform trait + wayland/ (wire.rs protocol, xkb.rs dlopen, mod.rs) + x11.rs + macos/ (Cocoa shim)
   src/prompt/           runtime-owned overlays (prompt band, file picker) as a second native UI tree
   src/io/               http.rs, ws.rs, messages, inbox, open_url, URL mapping
   src/pkg/              store.rs (manifest, cache, updates, .desktop, pack), zip.rs, json.rs, sha256.rs
@@ -81,6 +81,7 @@ crates/qa/              the runtime binary
 crates/qa-proto/        no_std: op/event/prop ids and encoding, shared by runtime and SDK;
                         val.rs is the structured value format, its reader, writer and JSON
 crates/qa-sdk/          no_std + alloc: the app SDK (json, time, net client, List, Rich, secret)
+sdks/                   one-file SDKs for C, Zig, AssemblyScript and TinyGo, each with a counter
 examples/               counter, widgets, sandbox, fetch, inbox, slack
 site/                   the landing page, install.sh, and build.sh, which packs the examples into site/dist
 ```

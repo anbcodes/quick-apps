@@ -8,7 +8,7 @@ Each milestone ends with something that runs.
 |---|---|---|---|
 | M0 | **Pixels.** Wayland client, shm buffers, rasterizer (fills, strokes, rounded rects, clips), font loading, glyph rasterizing and caching | A hard-coded display list with text renders crisply at scales 1 and 1.25, resizes smoothly, and sits at 0% CPU when idle | Done (`qa demo`) |
 | M1 | **Tree and layout.** `qa-proto`, patch decoder, grid layout, text / button / input / checkbox / scroll, focus and keys, damage tracking | A native Rust test harness builds a todo UI through patches. Typing redraws only the input's rect. | Done (`qa demo-todo`, tests) |
-| M2 | **Wasm.** wasmi host, ABI, `qa-sdk`, `app!`, `qa dev` with reload | `examples/counter` runs, and `counter.wasm` is ≤ 8 KB | Done (7.2 KB) |
+| M2 | **Wasm.** wasmi host, ABI, `qa-sdk`, `app!`, `qa dev` with reload | `examples/counter` runs, and `counter.wasm` is ≤ 8 KB | Done (7.5 KB) |
 | M3 | **Sandbox.** fs handles with `openat2`, timers, prompt band, grants file, file and folder pickers, memory and CPU limits | A runaway loop gets throttled. A memory hog triggers the prompt. `..` paths fail. | Done (`examples/sandbox`, tests) |
 | M4 | **Network and messages.** HTTP and WebSocket via `mhttp`, internet prompt, app sockets and inbox, clipboard, `open_url` | An example app fetches JSON and another one receives messages | Done (`examples/fetch`, `examples/inbox`) |
 | M5 | **Distribution.** zip reader, manifest, cache, update bar, `pack` / `install` / `list` / `remove` / `grants` / `rollback`, `.desktop` files | An app hosted on a static server installs, launches from the app menu, and updates | Done |

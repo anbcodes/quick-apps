@@ -37,7 +37,7 @@ A patch is a run of ops back to back. Each op starts with a `u8` opcode.
 | Op | Name | Fields | Effect |
 |---|---|---|---|
 | 1 | `CREATE` | `u32 id, u8 kind` | New detached node. Error if the id exists. |
-| 2 | `DESTROY` | `u32 id` | Detaches the node and destroys it and its whole subtree |
+| 2 | `DESTROY` | `u32 id` | Detaches the node and destroys it and its whole subtree. If focus was inside, it moves to the next focusable node (or the one before). |
 | 3 | `APPEND` | `u32 parent, u32 child` | Moves `child` to the end of `parent` (detaching it first) |
 | 4 | `INSERT` | `u32 parent, u32 child, u32 before` | Moves `child` in front of `before` |
 | 5 | `DETACH` | `u32 child` | Removes it from its parent but keeps it, so it can be reattached later |
@@ -79,7 +79,8 @@ Any node accepts these. The prop id is the `u16` in `SET`.
 | 13 | `hidden` | i32 | 0 | 1 takes the node out of layout and paint |
 | 14 | `variant` | str | "" | Picks a family of theme tokens, e.g. `"primary"`, `"danger"`, `"card"` |
 | 15 | `tooltip` | str | "" | Shown on hover after 600 ms |
-| 16 | `tag` | i32 | 0 | Sent back with the node's `Click`, `Change`, `Submit`, `Toggle`, `Select` and `Link` events ([events.md](events.md)) |
+| 16 | `tag` | i32 | 0 | Sent back with every event that comes from the node ([events.md](events.md)) |
+| 17 | `disabled` | i32 | 0 | 1 dims the node and everything inside it, and they get no focus and send no events |
 
 Kind-specific props start at id 20 and are listed in
 [components.md](components.md).

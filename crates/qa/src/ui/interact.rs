@@ -116,9 +116,10 @@ impl Ui {
             self.damage_node(old);
             self.damage_node(t);
         }
+        let off = self.is_disabled(t);
         let cursor = match self.nodes.get(&t) {
             None if self.selectable_text_at(x, y).is_some() => Cursor::Text,
-            Some(n) if n.disabled() => Cursor::Default,
+            Some(_) if off => Cursor::Default,
             Some(n) if n.kind == kind::INPUT => Cursor::Text,
             Some(n) if n.kind == kind::CANVAS => Cursor::Default,
             Some(_) => Cursor::Pointer,
@@ -338,7 +339,7 @@ impl Ui {
                 }
                 return;
             }
-            if self.nodes[&t].disabled() {
+            if self.is_disabled(t) {
                 return;
             }
             let k = self.nodes[&t].kind;
@@ -423,6 +424,16 @@ impl Ui {
                     }
                 } else {
                     self.activate(p, false);
+                    if matches!(self.nodes[&p].kind, kind::BUTTON | kind::GRID | kind::CHECKBOX) && !self.is_disabled(p) {
+                        let now = now_ms();
+                        let (last, at, _) = self.last_click;
+                        if last == p && now - at < 400 {
+                            self.out.push(UiEvent::DoubleClick(p));
+                            self.last_click = (0, 0, 0);
+                        } else {
+                            self.last_click = (p, now, 1);
+                        }
+                    }
                 }
             }
             self.update_hover(x, y);
@@ -447,10 +458,10 @@ impl Ui {
 
     /// Clicks a button, clickable grid, checkbox or select.
     fn activate(&mut self, id: u32, keyboard: bool) {
-        let n = &self.nodes[&id];
-        if n.disabled() {
+        if self.is_disabled(id) {
             return;
         }
+        let n = &self.nodes[&id];
         match n.kind {
             kind::BUTTON | kind::GRID => self.out.push(UiEvent::Click(id)),
             kind::CHECKBOX => {
@@ -563,7 +574,7 @@ impl Ui {
             }
         }
         let f = self.focus;
-        if f != 0 && self.nodes.contains_key(&f) && !self.nodes[&f].disabled() {
+        if f != 0 && self.nodes.contains_key(&f) && !self.is_disabled(f) {
             let k = self.nodes[&f].kind;
             match k {
                 kind::INPUT => {

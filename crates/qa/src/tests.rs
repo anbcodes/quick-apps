@@ -485,9 +485,97 @@ fn events_carry_the_node_tag() {
     let b = crate::host::encode::ui_event(&UiEvent::Change(1, "x".into()), ui.tag_of(1));
     let mut r = Reader::new(&b);
     assert_eq!((r.u8(), r.u32(), r.str(), r.i32()), (Some(ev::CHANGE), Some(1), Some("x"), Some(42)));
-    // Keys and pointers don't carry it.
+    // So does every other node event.
     let b = crate::host::encode::ui_event(&UiEvent::FocusOut(1), 42);
-    assert_eq!(b.len(), 5);
+    let mut r = Reader::new(&b);
+    assert_eq!((r.u8(), r.u32(), r.i32()), (Some(ev::FOCUS_OUT), Some(1), Some(42)));
+}
+
+fn click(ui: &mut Ui, id: u32) {
+    let r = ui.node(id).unwrap().rect;
+    let (x, y) = (r.x + 5.0, r.y + r.h / 2.0);
+    ui.pointer_move(x, y);
+    ui.pointer_button(crate::platform::BUTTON_LEFT, true, x, y);
+    ui.pointer_button(crate::platform::BUTTON_LEFT, false, x, y);
+}
+
+/// A column (1) holding three buttons (2, 3, 4).
+fn three_buttons() -> Ui {
+    use qa_proto::{kind, Sink};
+    let mut ui = ui();
+    patch(&mut ui, |p| {
+        p.op_create(1, kind::GRID);
+        for i in 2..=4 {
+            p.op_create(i, kind::BUTTON);
+            p.op_append(1, i);
+        }
+        p.op_root(1);
+    });
+    ui
+}
+
+#[test]
+fn disabling_a_grid_disables_what_is_inside() {
+    use qa_proto::prop;
+    let mut ui = three_buttons();
+    patch(&mut ui, |p| set_i(p, 3, prop::DISABLED, 1));
+    click(&mut ui, 3);
+    click(&mut ui, 2);
+    assert_eq!(ui.take_events(), vec![UiEvent::Click(2)]);
+    assert_eq!(ui.focus_order(), vec![2, 4]);
+    patch(&mut ui, |p| set_i(p, 1, prop::DISABLED, 1));
+    click(&mut ui, 2);
+    assert!(ui.take_events().is_empty());
+    assert!(ui.focus_order().is_empty());
+}
+
+#[test]
+fn focus_moves_on_when_its_node_is_destroyed() {
+    use qa_proto::Sink;
+    let mut ui = three_buttons();
+    ui.set_focus(3, true);
+    patch(&mut ui, |p| p.op_destroy(3));
+    assert_eq!(ui.focus, 4);
+    assert!(ui.focus_visible);
+    // The last one hands focus back to the one before it.
+    patch(&mut ui, |p| p.op_destroy(4));
+    assert_eq!(ui.focus, 2);
+    patch(&mut ui, |p| p.op_destroy(2));
+    assert_eq!(ui.focus, 0);
+}
+
+#[test]
+fn two_quick_clicks_send_a_double_click() {
+    let mut ui = three_buttons();
+    click(&mut ui, 2);
+    click(&mut ui, 2);
+    assert_eq!(ui.take_events(), vec![UiEvent::Click(2), UiEvent::Click(2), UiEvent::DoubleClick(2)]);
+    // A third click starts over, and clicks on different nodes don't pair up.
+    click(&mut ui, 2);
+    click(&mut ui, 3);
+    assert_eq!(ui.take_events(), vec![UiEvent::Click(2), UiEvent::Click(3)]);
+}
+
+#[test]
+fn checkbox_labels_wrap() {
+    use qa_proto::{kind, prop, Sink, Value};
+    let mut ui = ui();
+    patch(&mut ui, |p| {
+        p.op_create(1, kind::GRID);
+        p.op_create(2, kind::CHECKBOX);
+        p.op_set(2, prop::checkbox::LABEL);
+        p.value(&Value::Str("a label that is far too long to fit on one line of a narrow window, so it wraps"));
+        p.op_set(2, prop::ALIGN_Y);
+        p.value(&Value::I32(1));
+        p.op_append(1, 2);
+        p.op_root(1);
+    });
+    ui.set_window(200, 480, 1.0);
+    ui.layout();
+    let tall = ui.node(2).unwrap().rect.h;
+    patch(&mut ui, |p| set_i(p, 2, prop::checkbox::WRAP, 1));
+    let short = ui.node(2).unwrap().rect.h;
+    assert!(tall >= short * 3.0, "{tall} vs {short}");
 }
 
 #[test]

@@ -27,6 +27,14 @@ impl App for Widgets {
         let chosen = ui.text("Nothing picked").variant("muted").align_y(CENTER).add_to(row);
         ui.checkbox("A checkbox").add_to(p1);
         ui.checkbox("Disabled and checked").checked(true).disabled(true).add_to(p1);
+        let mut r = Rich::new();
+        r.push("Rich text: ");
+        r.styled("bold", span::BOLD, "");
+        r.push(", ");
+        r.styled("struck out", span::STRIKE, "muted");
+        r.push(" and ");
+        r.styled("code", span::CODE, "");
+        ui.rich(&r).add_to(p1);
         let prow = ui.grid().cols(&[fr(1.0), auto()]).gap(10.0).add_to(p1);
         let bar = ui.progress(0.3).align_y(CENTER).add_to(prow);
         let more = ui.button("More").add_to(prow);

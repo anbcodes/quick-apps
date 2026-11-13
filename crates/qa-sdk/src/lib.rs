@@ -122,6 +122,10 @@ pub struct Ui {
     buf: Vec<u8>,
     next: u32,
     tag: i32,
+    /// What each input holds, kept up to date from `Change` and `Submit`.
+    values: Vec<(u32, String)>,
+    /// Set by `input()`, so apps without inputs don't carry the tracking code.
+    tracker: Option<fn(&mut Ui, &Event)>,
 }
 
 /// A node being built. Finish with `add_to`, `root` or `detached`.
@@ -133,7 +137,33 @@ pub struct B<'a> {
 
 impl Ui {
     pub const fn new() -> Ui {
-        Ui { buf: Vec::new(), next: 0, tag: 0 }
+        Ui { buf: Vec::new(), next: 0, tag: 0, values: Vec::new(), tracker: None }
+    }
+
+    /// The text an input holds now: what the user typed, or the last value
+    /// set. "" for an input nobody has typed in or set.
+    pub fn value(&self, n: Node) -> &str {
+        self.values.iter().find(|v| v.0 == n.0).map(|v| v.1.as_str()).unwrap_or("")
+    }
+    fn remember(&mut self, n: u32, s: &str) {
+        match self.values.iter_mut().find(|v| v.0 == n) {
+            Some(v) => {
+                v.1.clear();
+                v.1.push_str(s);
+            }
+            None => self.values.push((n, String::from(s))),
+        }
+    }
+    #[doc(hidden)]
+    pub fn __track(&mut self, ev: &Event) {
+        if let Some(f) = self.tracker {
+            f(self, ev);
+        }
+    }
+    fn track(&mut self, ev: &Event) {
+        if let Event::Change(n, s) | Event::Submit(n, s) = *ev {
+            self.remember(n.0, s);
+        }
     }
 
     /// The `tag` of the node the current event came from (0 if none).
@@ -177,6 +207,7 @@ impl Ui {
         self.create(kind::BUTTON).str(prop::button::LABEL, label)
     }
     pub fn input(&mut self) -> B<'_> {
+        self.tracker = Some(Ui::track);
         self.create(kind::INPUT)
     }
     pub fn checkbox(&mut self, label: &str) -> B<'_> {
@@ -232,6 +263,11 @@ impl Ui {
     /// Sets an input's value.
     pub fn set_value(&mut self, n: Node, s: &str) {
         self.set_str(n, prop::input::VALUE, s);
+        self.remember(n.0, s);
+    }
+    /// Dims a node and everything inside it and stops their input.
+    pub fn set_disabled(&mut self, n: Node, on: bool) {
+        self.set(n, prop::DISABLED, on as i32);
     }
     pub fn set_checked(&mut self, n: Node, on: bool) {
         self.set(n, prop::checkbox::CHECKED, on as i32);
@@ -257,6 +293,7 @@ impl Ui {
     }
     pub fn destroy(&mut self, n: Node) {
         self.buf.op_destroy(n.0);
+        self.values.retain(|v| v.0 != n.0);
     }
     pub fn focus(&mut self, n: Node) {
         self.buf.op_focus(n.0);
@@ -270,6 +307,7 @@ impl Ui {
     /// Puts `new` where `old` is (or makes it the root) and destroys `old`.
     pub fn replace(&mut self, old: Node, new: Node) {
         self.buf.op_replace(old.0, new.0);
+        self.values.retain(|v| v.0 != old.0);
     }
     pub fn set_tag(&mut self, n: Node, tag: i32) {
         self.set(n, prop::TAG, tag);
@@ -414,8 +452,11 @@ impl<'a> B<'a> {
         self.str(prop::text::STYLE, s)
     }
     /// 0 wrap, 1 one line + ellipsis, 2 one line clipped.
+    /// 0 wraps onto more lines, 1 keeps one line and cuts it with "…".
+    /// For text and checkbox labels.
     pub fn wrap(self, w: i32) -> Self {
-        self.int(prop::text::WRAP, w)
+        let p = if self.k == kind::CHECKBOX { prop::checkbox::WRAP } else { prop::text::WRAP };
+        self.int(p, w)
     }
     pub fn text_align(self, a: i32) -> Self {
         self.int(prop::text::TEXT_ALIGN, a)
@@ -431,6 +472,7 @@ impl<'a> B<'a> {
         self.str(p, s)
     }
     pub fn value(self, s: &str) -> Self {
+        self.ui.remember(self.n.0, s);
         self.str(prop::input::VALUE, s)
     }
     pub fn multiline(self, on: bool) -> Self {
@@ -442,14 +484,9 @@ impl<'a> B<'a> {
     pub fn lines(self, n: i32) -> Self {
         self.int(prop::input::LINES, n)
     }
+    /// Dims the node and everything inside it and stops their input.
     pub fn disabled(self, on: bool) -> Self {
-        let p = match self.k {
-            kind::INPUT => prop::input::DISABLED,
-            kind::CHECKBOX => prop::checkbox::DISABLED,
-            kind::SELECT => prop::select::DISABLED,
-            _ => prop::button::DISABLED,
-        };
-        self.int(p, on as i32)
+        self.int(prop::DISABLED, on as i32)
     }
     pub fn checked(self, on: bool) -> Self {
         self.int(prop::checkbox::CHECKED, on as i32)
@@ -516,15 +553,23 @@ pub enum Event<'a> {
     NearEnd(Node),
     /// A link span was clicked: the node and the span's index.
     Link(Node, u32),
+    /// The second of two quick clicks on a button, checkbox or clickable grid.
+    DoubleClick(Node),
     Unknown,
 }
 
 pub fn decode(b: &[u8]) -> Event<'_> {
-    let f = || -> Option<Event> {
+    __decode(b).0
+}
+
+/// The event and the tag of the node it came from (0 if none).
+#[doc(hidden)]
+pub fn __decode(b: &[u8]) -> (Event<'_>, i32) {
+    let f = || -> Option<(Event, i32)> {
         let mut r = Reader::new(b);
         let t = r.u8()?;
         let n = |r: &mut Reader| r.u32().map(Node);
-        Some(match t {
+        let e = match t {
             ev::RESIZE => Event::Resize { w: r.f32()?, h: r.f32()?, scale: r.f32()? },
             ev::CLICK => Event::Click(n(&mut r)?),
             ev::CHANGE => Event::Change(n(&mut r)?, r.str()?),
@@ -551,36 +596,17 @@ pub fn decode(b: &[u8]) -> Event<'_> {
             ev::FOCUS_OUT => Event::FocusOut(n(&mut r)?),
             ev::NEAR_END => Event::NearEnd(n(&mut r)?),
             ev::LINK => Event::Link(n(&mut r)?, r.u32()?),
+            ev::DOUBLE_CLICK => Event::DoubleClick(n(&mut r)?),
             _ => Event::Unknown,
-        })
+        };
+        // Events that name a node end with that node's tag.
+        let tag = match t {
+            ev::RESIZE | ev::TIMER | ev::HTTP | ev::WS | ev::MESSAGE | ev::REQUEST_DONE | ev::CLOSE | ev::ACTIVATE => 0,
+            _ => r.i32().unwrap_or(0),
+        };
+        Some((e, tag))
     };
-    f().unwrap_or(Event::Unknown)
-}
-
-/// The node tag the runtime appends to click, change, submit,
-/// toggle, select and link events.
-#[doc(hidden)]
-pub fn __tag(b: &[u8]) -> i32 {
-    let f = || -> Option<i32> {
-        let mut r = Reader::new(b);
-        r.u8()?;
-        r.u32()?;
-        match b[0] {
-            ev::CLICK => {}
-            ev::CHANGE | ev::SUBMIT => {
-                r.str()?;
-            }
-            ev::TOGGLE => {
-                r.u8()?;
-            }
-            ev::SELECT | ev::LINK => {
-                r.u32()?;
-            }
-            _ => return None,
-        }
-        r.i32()
-    };
-    f().unwrap_or(0)
+    f().unwrap_or((Event::Unknown, 0))
 }
 
 /// Text with styled ranges, for `Ui::rich` and `Ui::set_rich`.
@@ -676,8 +702,10 @@ macro_rules! app {
                 let buf = $crate::__take(ptr, len);
                 let ui = &mut *core::ptr::addr_of_mut!(__QA_UI);
                 if let Some(app) = (*core::ptr::addr_of_mut!(__QA_APP)).as_mut() {
-                    ui.__set_tag($crate::__tag(&buf));
-                    $crate::App::event(app, ui, $crate::decode(&buf));
+                    let (ev, tag) = $crate::__decode(&buf);
+                    ui.__set_tag(tag);
+                    ui.__track(&ev);
+                    $crate::App::event(app, ui, ev);
                 }
                 ui.flush();
             }
@@ -1011,6 +1039,30 @@ pub mod fs {
 
     pub fn write(dir: i32, path: &str, data: &[u8]) -> Result<(), i32> {
         open(dir, path, WRITE | CREATE | TRUNC)?.write_all(data)
+    }
+
+    /// Writes `path` by writing `path.tmp` and renaming it over `path`, so a
+    /// crash part-way leaves the old file whole. Use it for saved state.
+    pub fn write_atomic(dir: i32, path: &str, data: &[u8]) -> Result<(), i32> {
+        let tmp = cat(&[path, ".tmp"]);
+        write(dir, &tmp, data)?;
+        match rename(dir, &tmp, dir, path) {
+            r if r < 0 => Err(r),
+            _ => Ok(()),
+        }
+    }
+
+    /// Moves a file or folder. `to` is replaced if it exists.
+    pub fn rename(dir: i32, from: &str, to_dir: i32, to: &str) -> i32 {
+        #[cfg(target_arch = "wasm32")]
+        unsafe {
+            return sys::fs_rename(dir, from.as_ptr(), from.len(), to_dir, to.as_ptr(), to.len());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = (dir, from, to_dir, to);
+            err::IO
+        }
     }
 
     /// (is_dir, name) pairs.

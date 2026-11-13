@@ -3,8 +3,7 @@
 use crate::ui::UiEvent;
 use qa_proto::{ev, Sink};
 
-/// `tag` (the node's tag prop) is appended to click, change, submit,
-/// toggle, select and link events.
+/// `tag` (the node's tag prop) is appended to every event.
 pub fn ui_event(e: &UiEvent, tag: i32) -> Vec<u8> {
     let mut b = Vec::with_capacity(16);
     match e {
@@ -62,10 +61,13 @@ pub fn ui_event(e: &UiEvent, tag: i32) -> Vec<u8> {
             b.u32(*n);
             b.u32(*i);
         }
+        UiEvent::DoubleClick(n) => {
+            b.u8(ev::DOUBLE_CLICK);
+            b.u32(*n);
+        }
     }
-    if matches!(e, UiEvent::Click(_) | UiEvent::Change(..) | UiEvent::Submit(..) | UiEvent::Toggle(..) | UiEvent::Select(..) | UiEvent::Link(..)) {
-        b.i32(tag);
-    }
+    // Every node event ends with the node's tag.
+    b.i32(tag);
     b
 }
 

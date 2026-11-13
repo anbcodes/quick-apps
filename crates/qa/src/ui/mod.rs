@@ -151,7 +151,11 @@ impl Node {
     pub fn hidden(&self) -> bool {
         self.i(prop::HIDDEN, 0) != 0 || self.collapsed
     }
+    /// Disabled by its own props. `Ui::is_disabled` also looks at ancestors.
     pub fn disabled(&self) -> bool {
+        if self.i(prop::DISABLED, 0) != 0 {
+            return true;
+        }
         let p = match self.kind {
             kind::BUTTON => prop::button::DISABLED,
             kind::INPUT => prop::input::DISABLED,
@@ -200,6 +204,8 @@ pub enum UiEvent {
     NearEnd(u32),
     /// A link span was clicked: node, span index.
     Link(u32, u32),
+    /// The second of two quick clicks on a button, checkbox or clickable grid.
+    DoubleClick(u32),
 }
 
 impl UiEvent {
@@ -208,7 +214,7 @@ impl UiEvent {
         match *self {
             UiEvent::Click(n) | UiEvent::Change(n, _) | UiEvent::Submit(n, _) | UiEvent::Toggle(n, _) | UiEvent::Select(n, _) => n,
             UiEvent::Key { node, .. } | UiEvent::Pointer { node, .. } => node,
-            UiEvent::FocusOut(n) | UiEvent::NearEnd(n) | UiEvent::Link(n, _) => n,
+            UiEvent::FocusOut(n) | UiEvent::NearEnd(n) | UiEvent::Link(n, _) | UiEvent::DoubleClick(n) => n,
         }
     }
 }
@@ -288,7 +294,7 @@ pub struct Ui {
 fn is_paint_only(kind: u8, p: u16) -> bool {
     match p {
         prop::VARIANT | prop::TOOLTIP => kind != kind::TEXT,
-        prop::TAG => true,
+        prop::TAG | prop::DISABLED => true,
         _ => match kind {
             kind::GRID => p == prop::grid::SELECTED || p == prop::grid::CLICKABLE,
             kind::TEXT => p == prop::text::SPANS,
@@ -495,7 +501,29 @@ impl Ui {
         }
     }
 
+    /// True if the node or one of its ancestors is disabled.
+    pub fn is_disabled(&self, id: u32) -> bool {
+        let mut cur = id;
+        while let Some(n) = self.nodes.get(&cur) {
+            if n.disabled() {
+                return true;
+            }
+            cur = n.parent;
+        }
+        false
+    }
+
     fn destroy(&mut self, id: u32) {
+        // Focus inside the subtree moves to the next focusable node (or the
+        // one before), so keyboard use can carry on after a row is deleted.
+        let mut next = None;
+        if self.focus != 0 && self.is_ancestor(id, self.focus) {
+            let order = self.focus_order();
+            if let Some(pos) = order.iter().position(|&f| f == self.focus) {
+                let outside = |f: &&u32| !self.is_ancestor(id, **f);
+                next = order[pos + 1..].iter().find(outside).or_else(|| order[..pos].iter().rev().find(outside)).map(|&f| (f, self.focus_visible));
+            }
+        }
         self.detach(id);
         self.blur_if_inside(id);
         let mut stack = vec![id];
@@ -503,6 +531,9 @@ impl Ui {
             if let Some(n) = self.nodes.remove(&i) {
                 stack.extend(n.children);
             }
+        }
+        if let Some((f, visible)) = next {
+            self.set_focus(f, visible);
         }
         if self.is_ancestor(id, self.root) || self.root == id {
             self.root = 0;
@@ -819,7 +850,7 @@ impl Ui {
         let mut stack = vec![self.root];
         while let Some(id) = stack.pop() {
             let Some(n) = self.nodes.get(&id) else { continue };
-            if n.hidden() {
+            if n.hidden() || n.disabled() {
                 continue;
             }
             if n.focusable() {

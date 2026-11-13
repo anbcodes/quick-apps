@@ -64,6 +64,8 @@ pub mod prop {
     pub const TOOLTIP: u16 = 15;
     /// An i32 sent back with this node's events.
     pub const TAG: u16 = 16;
+    /// 1 dims the node and everything inside it and stops their input.
+    pub const DISABLED: u16 = 17;
 
     pub mod grid {
         pub const COLS: u16 = 20;
@@ -114,6 +116,8 @@ pub mod prop {
         pub const LABEL: u16 = 20;
         pub const CHECKED: u16 = 21;
         pub const DISABLED: u16 = 22;
+        /// 0 wraps the label onto more lines, 1 keeps one line and cuts it with "…".
+        pub const WRAP: u16 = 23;
     }
     pub mod select {
         pub const OPTIONS: u16 = 20;
@@ -149,6 +153,7 @@ pub mod ev {
     pub const FOCUS_OUT: u8 = 16;
     pub const NEAR_END: u8 = 17;
     pub const LINK: u8 = 18;
+    pub const DOUBLE_CLICK: u8 = 19;
 }
 
 /// Text span records (`prop::text::SPANS`): repeated
@@ -157,6 +162,7 @@ pub mod span {
     pub const BOLD: u8 = 1;
     pub const UNDERLINE: u8 = 2;
     pub const CODE: u8 = 4;
+    pub const STRIKE: u8 = 8;
     pub const LINK: u8 = 16;
 }
 

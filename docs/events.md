@@ -25,10 +25,11 @@ are queued and delivered in order. While the app is busy, `Resize` and
 | 16 | `FocusOut` | `u32 node` | An input lost focus (handy for "save on blur") |
 | 17 | `NearEnd` | `u32 node` | A `scroll` came within one viewport of its end, so the app can load more rows. It fires again only after the content grows. |
 | 18 | `Link` | `u32 node, u32 span` | A link span in a text node was clicked. `span` is the span's index in the node's `spans`. |
+| 19 | `DoubleClick` | `u32 node` | The second of two clicks within 400 ms on the same button, checkbox or clickable grid. It follows that click's own `Click` or `Toggle`, so a checkbox has toggled twice by then. |
 
-`Click`, `Change`, `Submit`, `Toggle`, `Select` and `Link` end with one more
-field, `i32 tag`: the node's `tag` prop (0 if unset). Decoders that stop
-reading early can ignore it. `open_url` is allowed while handling `Link`.
+Every event with a `node` field ends with one more field, `i32 tag`: the
+node's `tag` prop (0 if unset). Decoders that stop reading early can ignore
+it. `open_url` is allowed while handling `Link`.
 
 `mods` bits: 1 Shift, 2 Ctrl, 4 Alt, 8 Super.
 
