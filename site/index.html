@@ -82,6 +82,8 @@ button:hover, .btn:hover { filter: brightness(0.96); }
   flex-direction: column;
   gap: 6px;
 }
+.app .head { display: flex; align-items: center; gap: 10px; }
+.app .head img { width: 36px; height: 36px; flex: none; }
 .app p { font-size: 15px; flex: 1; margin: 0; }
 .app .meta { font-size: 13px; color: var(--muted); }
 .app .actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
@@ -174,7 +176,11 @@ async function load() {
       continue;
     }
     const card = el("div", { className: "app" });
-    card.append(el("h3", {}, m.name));
+    const head = el("div", { className: "head" });
+    const icon = el("img", { src: `${here}/apps/${slug}/icon.png`, alt: "" });
+    icon.addEventListener("error", () => icon.remove());
+    head.append(icon, el("h3", {}, m.name));
+    card.append(head);
     card.append(el("p", {}, m.description));
     card.append(el("div", { className: "meta" }, `${m.version} · ${size(m.size)}` + (m.command ? ` · runs as ${m.command}` : "")));
     const actions = el("div", { className: "actions" });

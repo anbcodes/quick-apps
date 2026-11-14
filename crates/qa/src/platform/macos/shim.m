@@ -370,6 +370,15 @@ void qa_close(void) {
 
 void qa_set_title(const char *t) { window.title = [NSString stringWithUTF8String:t] ?: @""; }
 
+// The Dock icon while the app runs. An installed app's .app bundle has its own
+// icon, but the running process is `qa`, which has none.
+void qa_set_icon(const unsigned char *png, size_t len) {
+    @autoreleasepool {
+        NSImage *img = [[NSImage alloc] initWithData:[NSData dataWithBytes:png length:len]];
+        if (img) NSApp.applicationIconImage = img;
+    }
+}
+
 void qa_set_cursor(int kind) {
     if (kind == cursorKind) return;
     cursorKind = kind;

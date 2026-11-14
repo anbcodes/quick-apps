@@ -545,8 +545,9 @@ pub fn pack(dir: &Path, out: &Path) -> Result<(PathBuf, PathBuf), String> {
     let command = j.str("command").unwrap_or("").to_string();
     let wasm = std::fs::read(dir.join("app.wasm")).map_err(|e| format!("app.wasm: {e}"))?;
     let mut entries = vec![("app.wasm".to_string(), wasm)];
-    if let Ok(icon) = std::fs::read(dir.join("icon.png")) {
-        entries.push(("icon.png".into(), icon));
+    let icon = std::fs::read(dir.join("icon.png")).ok();
+    if let Some(icon) = &icon {
+        entries.push(("icon.png".into(), icon.clone()));
     }
     fn walk(base: &Path, p: &Path, out: &mut Vec<(String, Vec<u8>)>) -> Result<(), String> {
         let Ok(rd) = std::fs::read_dir(p) else { return Ok(()) };
@@ -581,6 +582,12 @@ pub fn pack(dir: &Path, out: &Path) -> Result<(PathBuf, PathBuf), String> {
     };
     let mp = out.join("app.json");
     std::fs::write(&mp, m.to_json()).map_err(|e| e.to_string())?;
+    // A copy next to the manifest, for the web page that links to the app.
+    let web_icon = out.join("icon.png");
+    match icon {
+        Some(icon) => std::fs::write(&web_icon, icon).map_err(|e| e.to_string())?,
+        None => drop(std::fs::remove_file(&web_icon)),
+    }
     Ok((zp, mp))
 }
 

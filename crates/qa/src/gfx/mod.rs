@@ -93,6 +93,41 @@ pub struct Pixmap {
     pub px: Vec<u32>,
 }
 
+impl Pixmap {
+    /// A square copy at most `max` pixels wide, with the image centred and
+    /// scaled down (never up) to fit. Window icons have to be square.
+    pub fn fit_square(&self, max: i32) -> Pixmap {
+        let side = self.w.max(self.h).clamp(1, max.max(1));
+        let mut out = Pixmap { w: side, h: side, px: vec![0; (side * side) as usize] };
+        if self.w <= 0 || self.h <= 0 || self.px.len() < (self.w * self.h) as usize {
+            return out;
+        }
+        // Source pixels per output pixel.
+        let k = self.w.max(self.h) as f32 / side as f32;
+        let (ox, oy) = ((side as f32 - self.w as f32 / k) / 2.0, (side as f32 - self.h as f32 / k) / 2.0);
+        for y in 0..side {
+            for x in 0..side {
+                // Average the block of source pixels this one covers.
+                let (x0, x1) = (((x as f32 - ox) * k).floor() as i32, ((x as f32 + 1.0 - ox) * k).ceil() as i32);
+                let (y0, y1) = (((y as f32 - oy) * k).floor() as i32, ((y as f32 + 1.0 - oy) * k).ceil() as i32);
+                let (mut sum, mut n) = ([0u32; 4], 0u32);
+                for sy in y0.max(0)..y1.min(self.h) {
+                    for sx in x0.max(0)..x1.min(self.w) {
+                        let p = self.px[(sy * self.w + sx) as usize];
+                        for (i, s) in sum.iter_mut().enumerate() {
+                            *s += (p >> (i * 8)) & 0xff;
+                        }
+                        n += 1;
+                    }
+                }
+                let n = (((x1 - x0) * (y1 - y0)).max(1) as u32).max(n);
+                out.px[(y * side + x) as usize] = (0..4).fold(0, |a, i| a | ((sum[i] / n) << (i * 8)));
+            }
+        }
+        out
+    }
+}
+
 /// One display-list command. Coordinates are physical pixels.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Cmd {
@@ -180,5 +215,25 @@ pub fn render(list: &[Cmd], canvas: &mut Canvas, damage: Rect, fonts: &Fonts, ca
             Cmd::Clip { rect, radius } => canvas.push_clip(*rect, *radius),
             Cmd::Unclip => canvas.pop_clip(),
         }
+    }
+}
+
+#[cfg(test)]
+mod t {
+    use super::*;
+
+    #[test]
+    fn fit_square_pads_and_shrinks() {
+        // 4×2 opaque white becomes 2×2 with a transparent band above and below.
+        let pm = Pixmap { w: 4, h: 2, px: vec![0xffffffff; 8] };
+        let s = pm.fit_square(2);
+        assert_eq!((s.w, s.h), (2, 2));
+        assert_eq!(s.px, vec![0x7f7f7f7f; 4]);
+        // Small images are centred, not scaled up.
+        let s = Pixmap { w: 2, h: 2, px: vec![0xff112233; 4] }.fit_square(64);
+        assert_eq!((s.w, s.px), (2, vec![0xff112233; 4]));
+        let s = Pixmap { w: 4, h: 2, px: vec![0xff112233; 8] }.fit_square(64);
+        assert_eq!(s.px[..4], [0; 4]);
+        assert_eq!(s.px[4..12], [0xff112233; 8]);
     }
 }

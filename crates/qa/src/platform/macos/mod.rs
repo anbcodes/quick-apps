@@ -30,6 +30,7 @@ extern "C" {
     fn qa_present(px: *const u32, w: c_int, h: c_int, stride: usize);
     fn qa_close();
     fn qa_set_title(t: *const c_char);
+    fn qa_set_icon(png: *const u8, len: usize);
     fn qa_set_cursor(kind: c_int);
     fn qa_set_min_size(w: c_int, h: c_int);
     fn qa_clip_set(t: *const c_char);
@@ -222,6 +223,11 @@ impl Platform for Mac {
         self.title = title.to_string();
         self.ensure_open();
         unsafe { qa_set_title(cstr(title).as_ptr()) };
+    }
+
+    fn set_icon(&mut self, png: &[u8]) {
+        self.ensure_open();
+        unsafe { qa_set_icon(png.as_ptr(), png.len()) };
     }
 
     fn set_cursor(&mut self, cursor: Cursor) {

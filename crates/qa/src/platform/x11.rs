@@ -33,6 +33,7 @@ struct Atoms {
     targets: u32,
     qa_paste: u32,
     incr: u32,
+    net_wm_icon: u32,
 }
 
 pub struct X11 {
@@ -71,6 +72,8 @@ pub struct X11 {
     cursor_font: u32,
     title: String,
     app_id: String,
+    /// The _NET_WM_ICON property, ready to set once the window exists.
+    icon: Vec<u8>,
     mods: u8,
     min_size: (i32, i32),
     debug: bool,
@@ -210,7 +213,7 @@ impl X11 {
             min_kc: 8,
             per: 0,
             keysyms: Vec::new(),
-            atoms: Atoms { wm_protocols: 0, wm_delete: 0, net_wm_name: 0, utf8: 0, clipboard: 0, targets: 0, qa_paste: 0, incr: 0 },
+            atoms: Atoms { wm_protocols: 0, wm_delete: 0, net_wm_name: 0, utf8: 0, clipboard: 0, targets: 0, qa_paste: 0, incr: 0, net_wm_icon: 0 },
             win: 0,
             gc: 0,
             w: 0,
@@ -226,6 +229,7 @@ impl X11 {
             cursor_font: 0,
             title: title.to_string(),
             app_id: app_id.to_string(),
+            icon: Vec::new(),
             mods: 0,
             min_size: (0, 0),
             debug: std::env::var_os("QA_DEBUG").is_some(),
@@ -407,8 +411,8 @@ impl X11 {
     }
 
     fn intern_atoms(&mut self) -> io::Result<()> {
-        let a = self.intern(&["WM_PROTOCOLS", "WM_DELETE_WINDOW", "_NET_WM_NAME", "UTF8_STRING", "CLIPBOARD", "TARGETS", "QA_PASTE", "INCR"])?;
-        self.atoms = Atoms { wm_protocols: a[0], wm_delete: a[1], net_wm_name: a[2], utf8: a[3], clipboard: a[4], targets: a[5], qa_paste: a[6], incr: a[7] };
+        let a = self.intern(&["WM_PROTOCOLS", "WM_DELETE_WINDOW", "_NET_WM_NAME", "UTF8_STRING", "CLIPBOARD", "TARGETS", "QA_PASTE", "INCR", "_NET_WM_ICON"])?;
+        self.atoms = Atoms { wm_protocols: a[0], wm_delete: a[1], net_wm_name: a[2], utf8: a[3], clipboard: a[4], targets: a[5], qa_paste: a[6], incr: a[7], net_wm_icon: a[8] };
         Ok(())
     }
 
@@ -487,6 +491,7 @@ impl X11 {
         let protocols = self.atoms.wm_delete.to_le_bytes();
         self.set_prop(self.atoms.wm_protocols, XA_ATOM, 32, &protocols);
         self.apply_min_size();
+        self.apply_icon();
         self.req(8, 0, &self.win.to_le_bytes());
     }
 
@@ -494,6 +499,14 @@ impl X11 {
         let t = self.title.clone();
         self.set_prop(XA_WM_NAME, self.atoms.utf8, 8, t.as_bytes());
         self.set_prop(self.atoms.net_wm_name, self.atoms.utf8, 8, t.as_bytes());
+    }
+
+    fn apply_icon(&mut self) {
+        if !self.icon.is_empty() {
+            let data = std::mem::take(&mut self.icon);
+            self.set_prop(self.atoms.net_wm_icon, XA_CARDINAL, 32, &data);
+            self.icon = data;
+        }
     }
 
     fn apply_min_size(&mut self) {
@@ -856,6 +869,26 @@ impl Platform for X11 {
         self.title = title.to_string();
         if self.win != 0 {
             self.apply_title();
+        }
+    }
+
+    fn set_icon(&mut self, png: &[u8]) {
+        let Ok(pm) = crate::gfx::png::decode(png) else { return };
+        // _NET_WM_ICON: width, height, then straight (not premultiplied) ARGB.
+        // 128 px keeps the property inside one request without BIG-REQUESTS.
+        let pm = pm.fit_square(128);
+        let mut data = Vec::with_capacity(8 + pm.px.len() * 4);
+        data.extend_from_slice(&(pm.w as u32).to_le_bytes());
+        data.extend_from_slice(&(pm.h as u32).to_le_bytes());
+        for &p in &pm.px {
+            let a = p >> 24;
+            let un = |c: u32| if a == 0 { 0 } else { (c * 255 / a).min(255) };
+            let v = (a << 24) | (un((p >> 16) & 0xff) << 16) | (un((p >> 8) & 0xff) << 8) | un(p & 0xff);
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        self.icon = data;
+        if self.win != 0 {
+            self.apply_icon();
         }
     }
 

@@ -29,6 +29,8 @@ qa run sdks/c/examples/counter.wasm
 `qa run`, `qa shot` and `qa pack` take the `.wasm` file. `qa dev` (rebuild on
 save) only knows how to build Rust crates.
 
+An `icon.png` in the same folder as the `.wasm` becomes the app's icon.
+
 ## What every SDK has
 
 - **Tree:** create each built-in component, set any prop (int, number,

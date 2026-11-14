@@ -63,7 +63,7 @@ fn main() {
         Some("dev") if args.len() >= 2 => dev::run(&args[1..]),
         Some("shot") if args.len() >= 2 => shot::run(&args[1..]),
         Some("demo") => demo::run(),
-        Some("demo-todo") => run_native(todo::Todo::new(), "Todo", "qa-demo-todo"),
+        Some("demo-todo") => run_native(todo::Todo::new(), "Todo", "qa-demo-todo", None),
         Some("-h") | Some("--help") | Some("help") => {
             print!("{USAGE}");
             0
@@ -94,13 +94,14 @@ fn load_fonts() -> Option<text::Fonts> {
     Some(fonts)
 }
 
-fn run_native(mut d: impl shell::Driver, title: &str, app_id: &str) -> i32 {
-    run_native_sized(&mut d, title, app_id, (900, 600))
+fn run_native(mut d: impl shell::Driver, title: &str, app_id: &str, icon: Option<&std::path::Path>) -> i32 {
+    run_native_sized(&mut d, title, app_id, (900, 600), icon)
 }
 
 /// Runs a driver in a window that starts at `size` (logical px) unless the
 /// compositor picks one.
-fn run_native_sized(d: &mut dyn shell::Driver, title: &str, app_id: &str, size: (i32, i32)) -> i32 {
+/// `icon` is a PNG to show as the window's icon.
+fn run_native_sized(d: &mut dyn shell::Driver, title: &str, app_id: &str, size: (i32, i32), icon: Option<&std::path::Path>) -> i32 {
     let Some(fonts) = load_fonts() else { return 1 };
     let mut p = match platform::Native::connect(title, app_id) {
         Ok(p) => p,
@@ -110,6 +111,10 @@ fn run_native_sized(d: &mut dyn shell::Driver, title: &str, app_id: &str, size: 
         }
     };
     p.set_default_size(size);
+    if let Some(png) = icon.and_then(|i| std::fs::read(i).ok()) {
+        use platform::Platform;
+        p.set_icon(&png);
+    }
     let ui = ui::Ui::new(fonts, ui::theme::Theme::load(app_id.strip_prefix("qa-")));
     let mut sh = shell::Shell::new(p, ui);
     sh.last_title = title.to_string();
@@ -149,5 +154,6 @@ pub fn run_app_with(wasm: Vec<u8>, ctx: pkg::AppCtx, check_update: bool) -> i32 
     if check_update {
         d.check_for_update();
     }
-    run_native(d, &name, &app_id)
+    let icon = d.ctx.bundle.as_ref().map(|b| b.join("icon.png"));
+    run_native(d, &name, &app_id, icon.as_deref())
 }

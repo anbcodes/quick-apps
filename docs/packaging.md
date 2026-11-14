@@ -12,6 +12,17 @@ assets/…        optional, readable through image `src` and fs handle 1 (read-o
 
 Other entries are ignored. The unzipped size may be at most 64 MB.
 
+### Icon
+
+`icon.png` is the app's icon everywhere one is shown: the menu entry an
+install writes, the install prompt, and the app's window (the title bar, task
+bar or Dock, depending on the system). Any size works. Make it square, since
+other shapes are centred on a transparent square. Without one, the app gets
+whatever the system shows for a program with no icon.
+
+On Wayland the window icon needs a compositor with `xdg-toplevel-icon-v1`.
+Others take it from the menu entry, so only installed apps have one there.
+
 ## Manifest
 
 A JSON file stored **next to** the bundle. Its URL is the app's identity.
@@ -96,6 +107,8 @@ Any static file host works, such as nginx, S3 or GitHub Pages.
 The input folder holds `app.wasm`, an optional `icon.png` and `assets/`, and an
 `app.json` that gives `name`, `version` and `description`. The output is
 `<name>-<version>.zip` plus a complete `app.json`. Upload both side by side.
+`icon.png` is also copied next to them, so the page that links to the app can
+show it.
 
 ### `qa dev`
 

@@ -56,6 +56,7 @@ struct Globals {
     cursor_mgr: u32,
     seat: (u32, u32),
     data_mgr: u32,
+    icon_mgr: u32,
 }
 
 pub struct Wayland {
@@ -273,6 +274,7 @@ impl Wayland {
                     let v = ver.min(7);
                     self.g.seat = (bind(self, Obj::Seat, v), v);
                 }
+                "xdg_toplevel_icon_manager_v1" => self.g.icon_mgr = bind(self, Obj::Other, 1),
                 "wl_data_device_manager" => self.g.data_mgr = bind(self, Obj::Other, ver.min(3)),
                 _ => {}
             }
@@ -827,6 +829,30 @@ impl Platform for Wayland {
 
     fn set_title(&mut self, title: &str) {
         self.c.send(self.toplevel, 2, &[Arg::S(title)]);
+    }
+
+    fn set_icon(&mut self, png: &[u8]) {
+        // xdg-toplevel-icon is newer than most of what we use, and compositors
+        // without it take the icon from the .desktop file named by the app id.
+        if self.g.icon_mgr == 0 {
+            return;
+        }
+        let Ok(pm) = crate::gfx::png::decode(png) else { return };
+        let pm = pm.fit_square(256);
+        let Ok(b) = self.alloc_buf(pm.px.len() * 4) else { return };
+        unsafe { std::ptr::copy_nonoverlapping(pm.px.as_ptr() as *const u8, b.ptr, pm.px.len() * 4) };
+        let buf = self.new_obj(Obj::Other);
+        self.c.send(b.pool, 0, &[Arg::N(buf), Arg::I(0), Arg::I(pm.w), Arg::I(pm.h), Arg::I(pm.w * 4), Arg::U(0)]);
+        let icon = self.new_obj(Obj::Other);
+        self.c.send(self.g.icon_mgr, 1, &[Arg::N(icon)]);
+        self.c.send(icon, 2, &[Arg::O(buf), Arg::I(1)]);
+        self.c.send(self.g.icon_mgr, 2, &[Arg::O(self.toplevel), Arg::O(icon)]);
+        // The compositor has copied the pixels by the time it handles set_icon.
+        self.c.send(icon, 0, &[]);
+        self.c.send(buf, 0, &[]);
+        self.objs.remove(&icon);
+        self.objs.remove(&buf);
+        self.free_buf(b);
     }
 
     fn set_cursor(&mut self, cursor: Cursor) {

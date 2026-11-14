@@ -150,6 +150,8 @@ pub trait Platform {
     fn request_frame(&mut self);
     fn size(&self) -> (i32, i32, f32);
     fn set_title(&mut self, title: &str);
+    /// Shows a PNG as the window's icon, where the window system has such a thing.
+    fn set_icon(&mut self, _png: &[u8]) {}
     fn set_cursor(&mut self, cursor: Cursor);
     fn set_min_size(&mut self, w: i32, h: i32);
     fn begin_move(&mut self);
@@ -235,6 +237,9 @@ impl Platform for Native {
     }
     fn set_title(&mut self, title: &str) {
         each!(self, p => p.set_title(title))
+    }
+    fn set_icon(&mut self, png: &[u8]) {
+        each!(self, p => p.set_icon(png))
     }
     fn set_cursor(&mut self, cursor: Cursor) {
         each!(self, p => p.set_cursor(cursor))
