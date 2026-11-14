@@ -372,19 +372,53 @@ pub(super) fn exe() -> String {
 
 #[cfg(target_os = "linux")]
 pub fn write_desktop(ctx: &AppCtx, m: &Manifest) -> Result<PathBuf, String> {
+    write_entry(ctx, &m.name, &m.description, false)
+}
+
+/// Whether the app has an entry in the app menu, which is what makes it installed
+/// rather than only cached.
+pub fn has_menu_entry(ctx: &AppCtx) -> bool {
+    #[cfg(target_os = "linux")]
+    return std::fs::read_to_string(desktop_path(ctx)).is_ok_and(|s| !s.contains("\nNoDisplay=true\n"));
+    #[cfg(not(target_os = "linux"))]
+    return desktop_path(ctx).exists();
+}
+
+/// Desktops look a window's name and icon up in the entry named after its app
+/// id, and show the bare id when there is none. So an app that runs without
+/// being installed gets an entry too, one the menu doesn't list.
+pub fn write_running_entry(ctx: &AppCtx) {
+    #[cfg(target_os = "linux")]
+    if !has_menu_entry(ctx) {
+        let _ = write_entry(ctx, &ctx.name, "", true);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = ctx;
+}
+
+#[cfg(target_os = "linux")]
+fn write_entry(ctx: &AppCtx, name: &str, comment: &str, hidden: bool) -> Result<PathBuf, String> {
     let exe = exe();
     let clean = |s: &str| s.replace(['\n', '\r'], " ");
-    let icon = bundle_dir(ctx).join("icon.png");
+    let icon = ctx.bundle.clone().unwrap_or_else(|| bundle_dir(ctx)).join("icon.png");
+    // A local app's source is file://<folder or .wasm>, which `qa run` takes as a path.
+    let target = match ctx.source.strip_prefix("file://") {
+        Some(path) if !path.ends_with(".json") => path,
+        _ => &ctx.source,
+    };
     let mut s = format!(
         "[Desktop Entry]\nType=Application\nName={}\nComment={}\nExec={} run {}\nStartupWMClass=qa-{}\n",
-        clean(&m.name),
-        clean(&m.description),
+        clean(name),
+        clean(comment),
         exe,
-        ctx.source.replace(' ', "%20"),
+        target.replace(' ', "%20"),
         ctx.id
     );
     if icon.exists() {
         s += &format!("Icon={}\n", icon.display());
+    }
+    if hidden {
+        s += "NoDisplay=true\n";
     }
     let p = desktop_path(ctx);
     if let Some(d) = p.parent() {

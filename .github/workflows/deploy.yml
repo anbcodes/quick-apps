@@ -1,0 +1,92 @@
+# Tests the runtime, builds it for Linux and both kinds of Mac, and on a push
+# to main deploys the site with all three.
+#
+# The deploy needs one repository secret, CLOUDFLARE_API_TOKEN: a Cloudflare
+# API token made from the "Edit Cloudflare Workers" template. Without it the
+# deploy step is skipped and the rest still runs.
+name: Test, build and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  SITE_URL: https://qa.anb.codes
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      # Cargo.toml takes mhttp from ../mtui, so the two repos sit side by side.
+      - uses: actions/checkout@v4
+        with:
+          path: quick-apps
+      - uses: actions/checkout@v4
+        with:
+          repository: anbcodes/mtui
+          path: mtui
+      # The text tests need a font to measure with.
+      - run: sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
+      - run: cargo test --release --workspace
+        working-directory: quick-apps
+
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: quick-apps
+      - uses: actions/checkout@v4
+        with:
+          repository: anbcodes/mtui
+          path: mtui
+      - run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+      - name: Build both runtimes
+        working-directory: quick-apps
+        run: |
+          mkdir -p site/mac
+          for t in x86_64 aarch64; do
+            cargo build --release -p qa --target $t-apple-darwin
+            cp target/$t-apple-darwin/release/qa site/mac/qa-$t-darwin
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: quick-apps/site/mac/
+          if-no-files-found: error
+
+  site:
+    needs: [test, mac]
+    # An older Ubuntu, so the Linux runtime starts on systems with an older glibc.
+    runs-on: ubuntu-22.04
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: quick-apps
+      - uses: actions/checkout@v4
+        with:
+          repository: anbcodes/mtui
+          path: mtui
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac
+          path: quick-apps/site/mac
+      - run: site/build.sh "$SITE_URL"
+        working-directory: quick-apps
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: quick-apps/site/dist/
+      - name: Deploy
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && env.CLOUDFLARE_API_TOKEN != ''
+        working-directory: quick-apps
+        run: npx --yes wrangler@4 deploy -c site/wrangler.jsonc

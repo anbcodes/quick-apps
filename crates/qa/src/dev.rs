@@ -174,6 +174,7 @@ pub fn run(args: &[String]) -> i32 {
     let name = dir.file_name().and_then(|s| s.to_str()).unwrap_or("app").to_string();
     let d = Dev::new(dir, wasm, &name, &opts);
     let app_id = format!("qa-{}", d.inner.ctx.id);
+    crate::pkg::store::write_running_entry(&d.inner.ctx);
     let icon = d.dir.join("icon.png");
     crate::run_native(d, &name, &app_id, Some(&icon))
 }

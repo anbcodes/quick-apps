@@ -21,7 +21,7 @@ pub fn link_url(arg: &str) -> String {
 pub fn open(arg: &str) -> i32 {
     let url = link_url(arg);
     let ctx = store::ctx_for(&url);
-    if store::is_installed(&ctx) && store::desktop_path(&ctx).exists() {
+    if store::is_installed(&ctx) && store::has_menu_entry(&ctx) {
         return crate::cli::run(&url);
     }
     let _ = store::register_handler();

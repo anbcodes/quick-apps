@@ -139,7 +139,9 @@ pub fn update(arg: &str) -> i32 {
         }
         Ok(Some(m)) => match store::download_update(&ctx, &m).and_then(|_| store::apply_update(&ctx)) {
             Ok(m) => {
-                let _ = store::write_desktop(&ctx, &m).ok().filter(|_| store::desktop_path(&ctx).exists());
+                if store::has_menu_entry(&ctx) {
+                    let _ = store::write_desktop(&ctx, &m);
+                }
                 println!("updated {} to {}", m.name, m.version);
                 0
             }

@@ -148,6 +148,7 @@ pub fn run_app_with(wasm: Vec<u8>, ctx: pkg::AppCtx, check_update: bool) -> i32 
     }
     let app_id = format!("qa-{}", ctx.id);
     let name = ctx.name.clone();
+    pkg::store::write_running_entry(&ctx);
     let mut d = host::WasmDriver::new(wasm, ctx);
     d.services = Box::new(io::Net::new(&d.ctx, true));
     d.after_start = io::drain_inbox(&d.ctx);

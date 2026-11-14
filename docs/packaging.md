@@ -176,8 +176,13 @@ Exec=qa run https://apps.example.com/notes/app.json
 StartupWMClass=qa-<app-id>
 ```
 
-The window's `xdg_toplevel` app_id is `qa-<app-id>`, so docks group and pin
-each app correctly.
+The window's `xdg_toplevel` app_id (and `WM_CLASS` on X11) is `qa-<app-id>`,
+so docks group and pin each app correctly, and task bars and window switchers
+find its name and icon in this file.
+
+An app that runs without being installed (`qa run`, `qa dev`, or **Just run
+it**) gets the same file with `NoDisplay=true`, so it has its name and icon
+while it runs but stays out of the menu. `qa remove` deletes it.
 
 ### Commands
 
