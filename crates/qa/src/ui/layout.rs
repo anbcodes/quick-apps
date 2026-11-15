@@ -228,7 +228,11 @@ struct Cell {
 
 impl Ui {
     fn pad(&self, id: u32) -> [f32; 4] {
-        self.nodes[&id].edges(prop::PAD)
+        let n = &self.nodes[&id];
+        if n.kind == kind::POPUP && n.get(prop::PAD).is_none() {
+            return [4.0; 4];
+        }
+        n.edges(prop::PAD)
     }
 
     fn clamp_w(&self, id: u32, v: f32) -> f32 {
@@ -545,6 +549,11 @@ impl Ui {
                 }
             }
             kind::IMAGE | kind::CANVAS => 0.0,
+            kind::POPUP => match self.nodes[&id].children.first().copied() {
+                Some(c) => self.min_w(c),
+                None => 0.0,
+            },
+            kind::MENU => self.menu_pref_w(id),
             _ => 0.0,
         }
     }
@@ -608,6 +617,11 @@ impl Ui {
             },
             kind::CANVAS => self.nodes[&id].i(prop::canvas::PX_W, 0) as f32,
             kind::IMAGE => self.image_size(id).0,
+            kind::POPUP => match self.nodes[&id].children.first().copied() {
+                Some(c) => self.pref_w(c),
+                None => 0.0,
+            },
+            kind::MENU => self.menu_pref_w(id),
             _ => 0.0,
         }
     }
@@ -677,6 +691,11 @@ impl Ui {
                     ph
                 }
             }
+            kind::POPUP => match self.nodes[&id].children.first().copied() {
+                Some(c) => self.height(c, w),
+                None => 0.0,
+            },
+            kind::MENU => self.menu_h(id),
             kind::IMAGE => {
                 let (iw, ih) = self.image_size(id);
                 let fit = self.nodes[&id].i(prop::image::FIT, 0);
@@ -788,10 +807,23 @@ impl Ui {
             let r = RectF::new(0.0, t, self.win_w, (self.win_h - t).max(0.0));
             self.arrange(self.root, r, false);
         }
+        self.place_popups();
         for id in self.take_scroll_to() {
             self.scroll_into_view(id);
         }
+        for id in std::mem::take(&mut self.near_check) {
+            self.check_near(id);
+        }
         true
+    }
+
+    pub(crate) fn arrange_popup(&mut self, id: u32, rect: RectF) {
+        let old = self.nodes[&id].rect;
+        if old != rect {
+            self.damage_rect(old);
+            self.damage_rect(RectF::new(rect.x - 4.0, rect.y - 4.0, rect.w + 8.0, rect.h + 12.0));
+        }
+        self.arrange(id, rect, false);
     }
 
     fn arrange(&mut self, id: u32, rect: RectF, parent_damaged: bool) {
@@ -813,6 +845,14 @@ impl Ui {
         match k {
             kind::GRID => self.arrange_grid(id, rect, damaged),
             kind::SCROLL => self.arrange_scroll(id, rect, damaged),
+            kind::POPUP => {
+                if let Some(c) = self.nodes[&id].children.first().copied() {
+                    let p = self.pad(id);
+                    let inner = RectF::new(rect.x + p[3], rect.y + p[0], (rect.w - p[1] - p[3]).max(0.0), (rect.h - p[0] - p[2]).max(0.0));
+                    let h = self.height(c, inner.w).min(inner.h);
+                    self.arrange(c, RectF::new(inner.x, inner.y, inner.w, h.max(inner.h.min(h))), damaged);
+                }
+            }
             _ => {}
         }
     }
@@ -918,36 +958,124 @@ impl Ui {
             }
             _ => (rect.w, self.height(child, rect.w).max(rect.h)),
         };
-        let mut near_end = false;
+        let anchor;
         {
             let st = self.nodes.get_mut(&id).unwrap().scroll().unwrap();
             let grew = ch > st.content_h + 0.5 || cw > st.content_w + 0.5;
-            if stick && st.at_end && grew {
+            let first = st.content_h == 0.0;
+            // Following the end wins over keeping the view in place.
+            let follow = stick && st.at_end && (grew || first);
+            if follow {
                 st.y = ch - rect.h;
             }
             if grew {
                 st.near_end_sent = false;
+                st.near_start_sent = false;
             }
+            anchor = if follow || axis == 1 { Vec::new() } else { std::mem::take(&mut st.anchor) };
             st.content_w = cw;
             st.content_h = ch;
             st.x = st.x.clamp(0.0, (cw - rect.w).max(0.0));
             st.y = st.y.clamp(0.0, (ch - rect.h).max(0.0));
-            st.at_end = st.y >= ch - rect.h - 1.0;
-            let remaining = if axis == 1 { cw - rect.w - st.x } else { ch - rect.h - st.y };
-            let viewport = if axis == 1 { rect.w } else { rect.h };
-            if remaining <= viewport && !st.near_end_sent && remaining < f32::INFINITY {
-                st.near_end_sent = true;
-                near_end = (if axis == 1 { cw } else { ch }) > viewport + 0.5;
-            }
-        }
-        if near_end {
-            self.out.push(super::UiEvent::NearEnd(id));
         }
         let (sx, sy) = match &self.nodes[&id].st {
             State::Scroll(s) => (s.x, s.y),
             _ => (0.0, 0.0),
         };
         self.arrange(child, RectF::new(rect.x - sx, rect.y - sy, cw, ch), damaged);
+        // Keep what was on screen where it was when content above it changed size.
+        let alive = anchor.into_iter().find(|(a, _)| self.nodes.get(a).is_some_and(|n| !n.hidden() && n.rect.h > 0.0) && self.is_ancestor(child, *a));
+        if let Some((a, off)) = alive {
+            let moved = self.nodes[&a].rect.y - rect.y - off;
+            if moved.abs() > 0.01 {
+                let st = self.nodes.get_mut(&id).unwrap().scroll().unwrap();
+                let oy = st.y;
+                st.y = (st.y + moved).clamp(0.0, (ch - rect.h).max(0.0));
+                let d = st.y - oy;
+                if d != 0.0 {
+                    self.translate(child, 0.0, -d);
+                    self.damage_rect(rect);
+                }
+            }
+        }
+        self.scrolled(id);
+        self.near_check.push(id);
+    }
+
+    /// Moves a subtree that is already arranged.
+    fn translate(&mut self, id: u32, dx: f32, dy: f32) {
+        let mut stack = vec![id];
+        while let Some(i) = stack.pop() {
+            if let Some(n) = self.nodes.get_mut(&i) {
+                n.rect.x += dx;
+                n.rect.y += dy;
+                stack.extend(n.children.iter().copied());
+            }
+        }
+    }
+
+    /// After a scroll moved: updates `at_end` and the anchors.
+    fn scrolled(&mut self, id: u32) {
+        let rect = self.nodes[&id].rect;
+        let content = self.nodes[&id].children.first().copied();
+        let anchors = content.map(|c| self.anchors_in(c, rect)).unwrap_or_default();
+        let anchors = anchors.into_iter().map(|a| (a, self.nodes[&a].rect.y - rect.y)).collect();
+        let st = self.nodes.get_mut(&id).unwrap().scroll().unwrap();
+        st.at_end = st.y >= st.content_h - rect.h - 1.0;
+        st.anchor = anchors;
+    }
+
+    /// Nodes to keep in place: the one on screen a quarter of the way down
+    /// (looking inside containers bigger than the view), and the one after
+    /// it in case the first is replaced.
+    fn anchors_in(&self, mut node: u32, vp: RectF) -> Vec<u32> {
+        let probe = vp.y + vp.h * 0.25;
+        loop {
+            let Some(n) = self.nodes.get(&node) else { return Vec::new() };
+            let shown: Vec<u32> = n.children.iter().copied().filter(|c| {
+                let cn = &self.nodes[c];
+                !cn.hidden() && cn.rect.h > 0.0
+            }).collect();
+            let Some(i) = shown.iter().position(|c| {
+                let r = self.nodes[c].rect;
+                r.y + r.h > probe
+            }) else {
+                return Vec::new();
+            };
+            let c = shown[i];
+            let cn = &self.nodes[&c];
+            let spans = cn.rect.y < vp.y - 0.5 || cn.rect.y + cn.rect.h > vp.y + vp.h + 0.5;
+            if spans && !cn.children.is_empty() && cn.kind != kind::SCROLL {
+                node = c;
+                continue;
+            }
+            return shown[i..].iter().copied().take(2).collect();
+        }
+    }
+
+    /// Sends NearStart / NearEnd when a scroll is within a viewport of either end.
+    pub(crate) fn check_near(&mut self, id: u32) {
+        let Some(n) = self.nodes.get(&id) else { return };
+        if n.hidden() {
+            return;
+        }
+        let rect = n.rect;
+        let axis = n.i(prop::scroll::AXIS, 0);
+        let Some(st) = self.nodes.get_mut(&id).and_then(|n| n.scroll()) else { return };
+        let (pos, size, vp) = if axis == 1 { (st.x, st.content_w, rect.w) } else { (st.y, st.content_h, rect.h) };
+        if size <= vp + 0.5 || vp <= 0.0 {
+            return;
+        }
+        let mut evs = Vec::new();
+        if size - vp - pos <= vp && !st.near_end_sent {
+            st.near_end_sent = true;
+            evs.push(super::UiEvent::NearEnd(id));
+        }
+        if pos <= vp && !st.near_start_sent {
+            st.near_start_sent = true;
+            evs.push(super::UiEvent::NearStart(id));
+        }
+        self.out.extend(evs);
     }
 
     /// Scrolls `id`'s scroll ancestors so it is visible.
@@ -979,7 +1107,7 @@ impl Ui {
         }
     }
 
-    /// Scrolls a scroll node and re-arranges its content. Returns whether it moved.
+    /// Scrolls a scroll node and moves its content. Returns whether it moved.
     pub fn scroll_by(&mut self, id: u32, dx: f32, dy: f32) -> bool {
         let rect = self.nodes[&id].rect;
         let axis = self.nodes[&id].i(prop::scroll::AXIS, 0);
@@ -991,15 +1119,23 @@ impl Ui {
         if axis != 1 {
             st.y = (st.y + dy).clamp(0.0, (st.content_h - rect.h).max(0.0));
         }
-        if (st.x, st.y) == (ox, oy) {
+        let (mx, my) = (st.x - ox, st.y - oy);
+        if (mx, my) == (0.0, 0.0) {
             return false;
         }
-        self.nodes.get_mut(&id).unwrap().dirty = true;
+        // Scrolled away from the start or end: those events may fire again.
+        if my < 0.0 || mx < 0.0 {
+            st.near_end_sent = false;
+        }
+        if my > 0.0 || mx > 0.0 {
+            st.near_start_sent = false;
+        }
+        if let Some(c) = self.nodes[&id].children.first().copied() {
+            self.translate(c, -mx, -my);
+        }
         self.damage_rect(rect);
-        // Re-arrange just this subtree in place.
-        let r = self.nodes[&id].rect;
-        self.nodes.get_mut(&id).unwrap().rect = RectF::default();
-        self.arrange(id, r, true);
+        self.scrolled(id);
+        self.check_near(id);
         true
     }
 }

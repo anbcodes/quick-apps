@@ -37,6 +37,8 @@ enum Tag {
     History(String, Fetch),
     Replies(String, String),
     Posted(String),
+    Permalink,
+    Deleted(String, String),
     Done,
     Mark,
     Connect,
@@ -156,6 +158,24 @@ enum Act {
     Older,
 }
 
+/// What a context menu item does.
+#[derive(Clone, Copy, PartialEq)]
+enum MenuAct {
+    Thread,
+    React,
+    CopyText,
+    CopyLink,
+    MarkUnread,
+    Delete,
+    ChanRead,
+    ChanOpen,
+    None,
+}
+
+/// Reactions offered by the picker.
+/// Only ones the runtime's fonts can draw (see `fmt::reaction`).
+const PICKS: [&str; 12] = ["heart", "white_check_mark", "x", "star", "smile", "frowning", "point_up", "warning", "zap", "coffee", "sunny", "question"];
+
 /// Names for rendering, and the reverse maps for outgoing mentions.
 #[derive(Default)]
 struct Dir {
@@ -208,6 +228,12 @@ struct View {
     last: Option<(String, i64)>,
     day: Option<i64>,
     older: Node,
+    /// The day separator above the oldest row.
+    first_sep: Node,
+    /// The first node of the list after the "Load older" button, where older rows go.
+    top: Node,
+    /// Each row's context menu.
+    menu: Node,
 }
 
 /// Tokens live in the runtime's secret store; the rest in the data folder.
@@ -292,6 +318,7 @@ struct Slack {
     cur: Option<String>,
     thread: Option<Thread>,
     team: String,
+    team_id: String,
 
     // network
     net: Client<Tag>,
@@ -347,6 +374,18 @@ struct Slack {
     acts: BTreeMap<u32, Act>,
     draft: String,
     tdraft: String,
+    mscroll: Node,
+
+    // context menus
+    msg_menu: Node,
+    chan_pop: Node,
+    chan_menu: Node,
+    react_pop: Node,
+    picks: Vec<(Node, &'static str)>,
+    menu_acts: Vec<MenuAct>,
+    /// The message a menu or the picker is for: (in the thread, channel, ts).
+    target: Option<(bool, String, String)>,
+    chan_target: Option<String>,
 }
 
 impl App for Slack {
@@ -404,6 +443,18 @@ impl App for Slack {
         let tinput = ui.input().placeholder("Reply…").add_to(tcomp);
         let tsend = ui.button("Reply").add_to(tcomp);
 
+        let msg_pop = ui.popup().detached();
+        let msg_menu = ui.menu("").add_to(msg_pop);
+        let chan_pop = ui.popup().detached();
+        let chan_menu = ui.menu("").add_to(chan_pop);
+        let react_pop = ui.popup().detached();
+        let rgrid = ui.grid().flow(true).gap(2.0).max_w(232.0).add_to(react_pop);
+        let mut picks = Vec::new();
+        for name in PICKS {
+            let b = ui.button(&fmt::reaction(name)).variant("flat").tooltip(name).add_to(rgrid);
+            picks.push((b, name));
+        }
+
         let tick_timer = interval(TICK_MS);
         let mut s = Slack {
             cfg: Config::load(),
@@ -412,6 +463,7 @@ impl App for Slack {
             cur: None,
             thread: None,
             team: String::new(),
+            team_id: String::new(),
             net: Client::new(),
             acc: Vec::new(),
             pages: 0,
@@ -448,16 +500,25 @@ impl App for Slack {
             note_row,
             input,
             send,
-            mview: View { host: mhost, ..View::default() },
+            mview: View { host: mhost, menu: msg_pop, ..View::default() },
             tsep,
             tpane,
             tclose,
             tinput,
             tsend,
-            tview: View { host: thost, ..View::default() },
+            tview: View { host: thost, menu: msg_pop, ..View::default() },
             acts: BTreeMap::new(),
             draft: String::new(),
             tdraft: String::new(),
+            mscroll,
+            msg_menu,
+            chan_pop,
+            chan_menu,
+            react_pop,
+            picks,
+            menu_acts: Vec::new(),
+            target: None,
+            chan_target: None,
         };
         if s.cfg.token.is_empty() {
             s.show_login(ui, "");
@@ -488,6 +549,22 @@ impl App for Slack {
             Event::Submit(id, _) | Event::Click(id) if id == self.input || id == self.send => self.send(ui, false),
             Event::Submit(id, _) | Event::Click(id) if id == self.tinput || id == self.tsend => self.send(ui, true),
             Event::Click(id) if id == self.tclose => self.close_thread(ui),
+            Event::ContextMenu { node, .. } => self.on_context(ui, node),
+            Event::Select(id, i) if id == self.msg_menu || id == self.chan_menu => self.on_menu(ui, i),
+            Event::Click(id) if self.picks.iter().any(|p| p.0 == id) => {
+                let name = self.picks.iter().find(|p| p.0 == id).map(|p| p.1).unwrap_or("");
+                ui.close(self.react_pop);
+                if let Some((thread, _, ts)) = self.target.clone() {
+                    self.act(ui, Act::React(thread, ts, String::from(name)));
+                }
+            }
+            Event::NearStart(id) if id == self.mscroll => {
+                if let Some(ci) = self.cur.as_deref().and_then(|id| self.idx(id)) {
+                    if self.chans[ci].loaded && self.chans[ci].more {
+                        self.load_history(ci, Fetch::Older);
+                    }
+                }
+            }
             // Sidebar rows are tagged with their index + 1.
             Event::Click(_) if ui.tag() > 0 => {
                 if let Some(c) = self.chans.get(ui.tag() as usize - 1) {
@@ -643,6 +720,7 @@ impl Slack {
             Tag::Auth => {
                 self.dir.me = String::from(v.get("user_id").str());
                 self.team = String::from(v.get("team").str());
+                self.team_id = String::from(v.get("team_id").str());
                 self.cfg.save();
                 ui.hide(self.login, true);
                 ui.hide(self.main, false);
@@ -714,6 +792,15 @@ impl Slack {
                 let url = String::from(v.get("url").str());
                 let headers = if self.rtm && !self.cfg.cookie.is_empty() { cat(&["Cookie: d=", &self.cfg.cookie, "\n"]) } else { String::new() };
                 self.ws = Some(net::ws(&url, &headers));
+            }
+            Tag::Permalink => {
+                clipboard::write(v.get("permalink").str());
+                self.flash(ui, "Link copied");
+            }
+            Tag::Deleted(chan, ts) => {
+                if let Some(ci) = self.idx(&chan) {
+                    self.remove_msg(ui, ci, &ts);
+                }
             }
             Tag::Done | Tag::Mark => {}
         }
@@ -1045,7 +1132,7 @@ impl Slack {
                 let h = ui.grid().pad4(12.0, 10.0, 4.0, 10.0).add_to(list);
                 ui.text(if dm { "Direct messages" } else { "Channels" }).style("caption").variant("muted").add_to(h);
             }
-            let row = ui.grid().cols(&[fr(1.0), auto()]).gap(6.0).pad4(4.0, 10.0, 4.0, 10.0).clickable(true).tag(i as i32 + 1).add_to(list);
+            let row = ui.grid().cols(&[fr(1.0), auto()]).gap(6.0).pad4(4.0, 10.0, 4.0, 10.0).clickable(true).tag(i as i32 + 1).context_menu(self.chan_pop).add_to(list);
             c.label = ui.text(&c.label()).wrap(1).add_to(row);
             c.badge = ui.text("").style("caption").variant("accent").add_to(row);
             c.row = row;
@@ -1070,6 +1157,7 @@ impl Slack {
         ui.set_str(self.input, prop::input::PLACEHOLDER, &cat(&["Message ", &label]));
         set_title(&cat(&[&label, " — Slack"]));
         self.build_main(ui);
+        scroll_end(ui, &self.mview);
         if self.chans[ci].loaded {
             self.load_history(ci, Fetch::Newer);
             self.mark_read(ci);
@@ -1118,23 +1206,37 @@ impl Slack {
         let mut fetched: Vec<Msg> = v.get("messages").iter().map(|m| Msg::from(m, &self.dir.me)).collect();
         fetched.reverse();
         let more = v.get("has_more").bool();
+        let viewing = self.is_cur(ci);
+        let today = self.today();
         let c = &mut self.chans[ci];
-        let mut redraw = false;
         let mut added = Vec::new();
-        let mut anchor = None;
         match f {
             Fetch::Initial => {
                 c.msgs = fetched;
                 c.more = more;
                 c.loaded = true;
-                redraw = true;
+                if viewing {
+                    self.build_main(ui);
+                    scroll_end(ui, &self.mview);
+                }
             }
             Fetch::Older => {
-                anchor = c.msgs.first().map(|m| m.ts.clone());
-                fetched.append(&mut c.msgs);
-                c.msgs = fetched;
+                // Rows go in above the ones shown; the view stays where it is.
+                let first = c.msgs.first().map_or(u64::MAX, |m| fmt::ts_us(&m.ts));
+                fetched.retain(|m| fmt::ts_us(&m.ts) < first);
                 c.more = more;
-                redraw = true;
+                let mut all = fetched.clone();
+                all.append(&mut c.msgs);
+                c.msgs = all;
+                if viewing {
+                    let c = &self.chans[ci];
+                    prepend(ui, &self.dir, &mut self.mview, &mut self.acts, &fetched, &c.msgs, today);
+                    if !c.more && self.mview.older.0 != 0 {
+                        self.acts.remove(&self.mview.older.0);
+                        ui.destroy(self.mview.older);
+                        self.mview.older = Node(0);
+                    }
+                }
             }
             Fetch::Newer => {
                 let last = c.msgs.last().map_or(0, |m| fmt::ts_us(&m.ts));
@@ -1144,42 +1246,57 @@ impl Slack {
                         c.msgs.push(m);
                     }
                 }
+                if viewing {
+                    for m in &added {
+                        push_msg(ui, &self.dir, &mut self.mview, &mut self.acts, m, false, today);
+                    }
+                }
             }
             Fetch::Refresh => {
                 // Replace the window the fetch covers: picks up edits,
-                // reactions, reply counts and deletions.
+                // reactions, reply counts and deletions. Only rows that
+                // changed are redrawn, so the view doesn't move.
                 if let Some(lo) = fetched.first().map(|m| fmt::ts_us(&m.ts)) {
                     let keep = c.msgs.iter().position(|m| fmt::ts_us(&m.ts) >= lo).unwrap_or(c.msgs.len());
                     if c.msgs[keep..] != fetched[..] {
-                        c.msgs.truncate(keep);
-                        c.msgs.extend(fetched);
-                        redraw = true;
+                        let old = c.msgs.split_off(keep);
+                        c.msgs.extend(fetched.iter().cloned());
+                        if viewing {
+                            let last_old = old.last().map_or(0, |m| fmt::ts_us(&m.ts));
+                            let inserted = fetched.iter().any(|m| fmt::ts_us(&m.ts) < last_old && !old.iter().any(|o| o.ts == m.ts));
+                            if inserted {
+                                self.build_main(ui);
+                            } else {
+                                for o in old.iter().filter(|o| !fetched.iter().any(|m| m.ts == o.ts)) {
+                                    remove_row(ui, &mut self.mview, &mut self.acts, &o.ts);
+                                }
+                                for m in &fetched {
+                                    match old.iter().find(|o| o.ts == m.ts) {
+                                        Some(o) if o != m => replace_row(ui, &self.dir, &mut self.mview, &mut self.acts, m, false),
+                                        Some(_) => {}
+                                        None => push_msg(ui, &self.dir, &mut self.mview, &mut self.acts, m, false, today),
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
+        let c = &mut self.chans[ci];
         if c.msgs.len() > KEEP && f != Fetch::Older {
+            // Forget the oldest; scroll anchoring keeps the view still.
             let cut = c.msgs.len() - KEEP;
-            c.msgs.drain(..cut);
+            let gone: Vec<String> = c.msgs.drain(..cut).map(|m| m.ts).collect();
             c.more = true;
+            if viewing {
+                for ts in gone {
+                    remove_row(ui, &mut self.mview, &mut self.acts, &ts);
+                }
+            }
         }
-        if self.is_cur(ci) {
-            if redraw {
-                self.build_main(ui);
-            } else {
-                let today = self.today();
-                for m in &added {
-                    push_msg(ui, &self.dir, &mut self.mview, &mut self.acts, m, false, today);
-                }
-            }
-            if let Some(ts) = anchor {
-                if let Some(r) = self.mview.rows.iter().find(|r| r.ts == ts) {
-                    ui.scroll_to(r.node);
-                }
-            }
-            if f == Fetch::Initial || !added.is_empty() {
-                self.mark_read(ci);
-            }
+        if viewing && (f == Fetch::Initial || !added.is_empty()) {
+            self.mark_read(ci);
         }
         self.want_users();
     }
@@ -1284,6 +1401,7 @@ impl Slack {
         ui.hide(self.tsep, false);
         ui.hide(self.tpane, false);
         self.build_thread(ui);
+        scroll_end(ui, &self.tview);
         self.load_thread();
         ui.focus(self.tinput);
     }
@@ -1350,6 +1468,8 @@ impl Slack {
         }
         self.call(Tag::Posted(chan.clone()), "chat.postMessage", &p);
         ui.set_value(if in_thread { self.tinput } else { self.input }, "");
+        // Sending goes back to the newest messages, where the reply will show.
+        scroll_end(ui, if in_thread { &self.tview } else { &self.mview });
     }
 
     fn act(&mut self, ui: &mut Ui, a: Act) {
@@ -1379,12 +1499,116 @@ impl Slack {
                             r.1 += 1;
                             r.2 = true;
                         }
+                    } else if !mine {
+                        m.reactions.push((name.clone(), 1, true));
                     }
                     m.reactions.retain(|r| r.1 > 0);
                 });
                 let method = if mine { "reactions.remove" } else { "reactions.add" };
                 self.call(Tag::Done, method, &[("channel", &chan), ("timestamp", &ts), ("name", &name)]);
             }
+        }
+    }
+
+    // ---------- context menus ----------
+
+    fn on_context(&mut self, ui: &mut Ui, node: Node) {
+        self.target = None;
+        self.chan_target = None;
+        self.menu_acts.clear();
+        let mut items: Vec<&str> = Vec::new();
+        if let Some(c) = self.chans.iter().find(|c| c.row == node) {
+            self.chan_target = Some(c.id.clone());
+            items.push("Mark as read");
+            self.menu_acts.push(MenuAct::ChanRead);
+            if !self.team_id.is_empty() {
+                items.push("Open in Slack ↗");
+                self.menu_acts.push(MenuAct::ChanOpen);
+            }
+            ui.set_items(self.chan_menu, &items.join("\n"));
+            return;
+        }
+        let (thread, ts) = if let Some(r) = self.mview.rows.iter().find(|r| r.node == node) {
+            (false, r.ts.clone())
+        } else if let Some(r) = self.tview.rows.iter().find(|r| r.node == node) {
+            (true, r.ts.clone())
+        } else {
+            return;
+        };
+        let chan = if thread { self.thread.as_ref().map(|t| t.chan.clone()) } else { self.cur.clone() };
+        let Some(chan) = chan else { return };
+        let mine = self.find_msg(thread, &chan, &ts).is_some_and(|m| m.user == self.dir.me);
+        let mut add = |label: &'static str, a: MenuAct| {
+            items.push(label);
+            self.menu_acts.push(a);
+        };
+        if !thread {
+            add("Reply in thread", MenuAct::Thread);
+        }
+        add("Add reaction…", MenuAct::React);
+        add("Copy text", MenuAct::CopyText);
+        add("Copy link", MenuAct::CopyLink);
+        if !thread {
+            add("Mark unread", MenuAct::MarkUnread);
+        }
+        if mine {
+            add("-", MenuAct::None);
+            add("Delete message", MenuAct::Delete);
+        }
+        ui.set_items(self.msg_menu, &items.join("\n"));
+        self.target = Some((thread, chan, ts));
+    }
+
+    fn find_msg(&self, thread: bool, chan: &str, ts: &str) -> Option<&Msg> {
+        if thread {
+            self.thread.as_ref().filter(|t| t.chan == chan)?.msgs.iter().find(|m| m.ts == ts)
+        } else {
+            self.chans[self.idx(chan)?].msgs.iter().find(|m| m.ts == ts)
+        }
+    }
+
+    fn on_menu(&mut self, ui: &mut Ui, i: i32) {
+        let Some(&a) = self.menu_acts.get(i as usize) else { return };
+        if let Some(cid) = self.chan_target.clone() {
+            let Some(ci) = self.idx(&cid) else { return };
+            match a {
+                MenuAct::ChanRead => {
+                    self.mark_read(ci);
+                    let cur = self.is_cur(ci);
+                    paint_chan(ui, &self.chans[ci], cur);
+                }
+                MenuAct::ChanOpen => {
+                    open_url(&cat(&["https://app.slack.com/client/", &self.team_id, "/", &cid]));
+                }
+                _ => {}
+            }
+            return;
+        }
+        let Some((thread, chan, ts)) = self.target.clone() else { return };
+        match a {
+            MenuAct::Thread => self.open_thread(ui, &ts),
+            MenuAct::React => ui.open(self.react_pop, Node(0)),
+            MenuAct::CopyText => {
+                if let Some(m) = self.find_msg(thread, &chan, &ts) {
+                    let t = fmt::render(&m.text, &self.dir.users, &self.dir.chans);
+                    clipboard::write(&t.rich.text);
+                    self.flash(ui, "Copied");
+                }
+            }
+            MenuAct::CopyLink => self.call(Tag::Permalink, "chat.getPermalink", &[("channel", &chan), ("message_ts", &ts)]),
+            MenuAct::MarkUnread => {
+                let Some(ci) = self.idx(&chan) else { return };
+                let c = &mut self.chans[ci];
+                let Some(i) = c.msgs.iter().position(|m| m.ts == ts) else { return };
+                // Read up to the message before this one.
+                let before = if i > 0 { c.msgs[i - 1].ts.clone() } else { String::from("0") };
+                c.marked = before.clone();
+                c.unread = true;
+                self.call(Tag::Mark, "conversations.mark", &[("channel", &chan), ("ts", &before)]);
+                self.flash(ui, "Marked unread from here");
+            }
+            MenuAct::Delete => self.call(Tag::Deleted(chan.clone(), ts.clone()), "chat.delete", &[("channel", &chan), ("ts", &ts)]),
+            _ => {}
         }
     }
 
@@ -1443,8 +1667,17 @@ impl Slack {
                 ui.set_text(self.title, &self.chans[ci].label());
             }
         }
-        self.build_main(ui);
-        self.build_thread(ui);
+        // Redraw rows in place, so the view doesn't move.
+        if let Some(ci) = self.cur.as_deref().and_then(|id| self.idx(id)) {
+            for m in &self.chans[ci].msgs {
+                replace_row(ui, &self.dir, &mut self.mview, &mut self.acts, m, false);
+            }
+        }
+        if let Some(t) = &self.thread {
+            for m in &t.msgs {
+                replace_row(ui, &self.dir, &mut self.tview, &mut self.acts, m, true);
+            }
+        }
     }
 
     /// Today's local day number.
@@ -1500,6 +1733,8 @@ fn clear_view(ui: &mut Ui, v: &mut View, acts: &mut BTreeMap<u32, Act>) {
     v.last = None;
     v.day = None;
     v.older = Node(0);
+    v.first_sep = Node(0);
+    v.top = Node(0);
 }
 
 fn rebuild(ui: &mut Ui, dir: &Dir, v: &mut View, acts: &mut BTreeMap<u32, Act>, msgs: &[Msg], more: bool, thread: bool, today: i64) {
@@ -1511,9 +1746,49 @@ fn rebuild(ui: &mut Ui, dir: &Dir, v: &mut View, acts: &mut BTreeMap<u32, Act>, 
     for m in msgs {
         push_msg(ui, dir, v, acts, m, thread, today);
     }
+}
+
+/// Shows the newest message. A `stick_end` scroll then follows new ones.
+fn scroll_end(ui: &mut Ui, v: &View) {
     if let Some(r) = v.rows.last() {
         ui.scroll_to(r.node);
     }
+}
+
+/// Adds older messages above the ones shown. `all` is the whole list after them.
+fn prepend(ui: &mut Ui, dir: &Dir, v: &mut View, acts: &mut BTreeMap<u32, Act>, older: &[Msg], all: &[Msg], today: i64) {
+    if older.is_empty() {
+        return;
+    }
+    if v.rows.is_empty() {
+        for m in older {
+            push_msg(ui, dir, v, acts, m, false, today);
+        }
+        return;
+    }
+    let block = ui.grid().gap(0.0).detached();
+    let mut top = View { host: v.host, list: block, menu: v.menu, ..View::default() };
+    for m in older {
+        push_msg(ui, dir, &mut top, acts, m, false, today);
+    }
+    ui.insert(v.list, block, v.top);
+    v.top = block;
+    // Join the two: one separator per day, one name line per group.
+    let first = &v.rows[0];
+    let secs = fmt::local_secs(&first.ts);
+    if top.day == Some(time::day(secs)) {
+        ui.destroy(v.first_sep);
+        if let (Some((w, t)), Some(m)) = (&top.last, all.iter().find(|m| m.ts == first.ts)) {
+            if w == m.who() && secs - t <= 300 {
+                v.rows[0].head = false;
+                replace_row(ui, dir, v, acts, m, false);
+            }
+        }
+    }
+    v.first_sep = top.first_sep;
+    let mut rows = core::mem::take(&mut top.rows);
+    rows.append(&mut v.rows);
+    v.rows = rows;
 }
 
 fn push_msg(ui: &mut Ui, dir: &Dir, v: &mut View, acts: &mut BTreeMap<u32, Act>, m: &Msg, thread: bool, today: i64) {
@@ -1526,16 +1801,21 @@ fn push_msg(ui: &mut Ui, dir: &Dir, v: &mut View, acts: &mut BTreeMap<u32, Act>,
         ui.divider().align_y(CENTER).add_to(sep);
         ui.text(&time::day_label(day, today)).style("caption").variant("muted").add_to(sep);
         ui.divider().align_y(CENTER).add_to(sep);
+        if v.rows.is_empty() {
+            v.first_sep = sep;
+            if v.top.0 == 0 {
+                v.top = sep;
+            }
+        }
     }
     let head = match &v.last {
         Some((w, t)) => w != m.who() || secs - t > 300,
         None => true,
     };
-    let (node, a) = msg_row(ui, dir, m, head, thread, acts);
+    let (node, a) = msg_row(ui, dir, m, head, thread, v.menu, acts);
     ui.append(v.list, node);
     v.rows.push(Row { ts: m.ts.clone(), node, head, acts: a });
     v.last = Some((String::from(m.who()), secs));
-    ui.scroll_to(node);
 }
 
 fn replace_row(ui: &mut Ui, dir: &Dir, v: &mut View, acts: &mut BTreeMap<u32, Act>, m: &Msg, thread: bool) {
@@ -1543,7 +1823,7 @@ fn replace_row(ui: &mut Ui, dir: &Dir, v: &mut View, acts: &mut BTreeMap<u32, Ac
     for a in r.acts.drain(..) {
         acts.remove(&a.0);
     }
-    let (node, a) = msg_row(ui, dir, m, r.head, thread, acts);
+    let (node, a) = msg_row(ui, dir, m, r.head, thread, v.menu, acts);
     ui.replace(r.node, node);
     r.node = node;
     r.acts = a;
@@ -1561,14 +1841,14 @@ fn remove_row(ui: &mut Ui, v: &mut View, acts: &mut BTreeMap<u32, Act>, ts: &str
 
 /// One message: an optional name/time line, the text, files, then a bar of
 /// reactions, the reply count and a link button.
-fn msg_row(ui: &mut Ui, dir: &Dir, m: &Msg, head: bool, thread: bool, acts: &mut BTreeMap<u32, Act>) -> (Node, Vec<Node>) {
+fn msg_row(ui: &mut Ui, dir: &Dir, m: &Msg, head: bool, thread: bool, menu: Node, acts: &mut BTreeMap<u32, Act>) -> (Node, Vec<Node>) {
     let mut a = Vec::new();
     let mut act = |n: Node, x: Act, a: &mut Vec<Node>| {
         acts.insert(n.0, x);
         a.push(n);
     };
     let time = time::hhmm(fmt::local_secs(&m.ts));
-    let row = ui.grid().cols(&[fr(1.0), auto()]).gap(4.0).pad4(if head { 8.0 } else { 1.0 }, 8.0, 1.0, 16.0).detached();
+    let row = ui.grid().cols(&[fr(1.0), auto()]).gap(4.0).pad4(if head { 8.0 } else { 1.0 }, 8.0, 1.0, 16.0).context_menu(menu).detached();
     let body = ui.grid().gap(2.0).add_to(row);
     if head {
         let h = ui.grid().cols(&[auto(), auto(), fr(1.0)]).gap(8.0).add_to(body);

@@ -748,3 +748,261 @@ fn text_selects_by_default_and_copies() {
     ui.pointer_button(BUTTON_LEFT, false, nr.x + 300.0, ny);
     assert!(ui.selected_text().is_none());
 }
+
+/// A scroll (1) holding a column (2) of `n` buttons (100..), as the root.
+fn long_list(n: u32) -> Ui {
+    use qa_proto::{kind, prop, Sink, Value};
+    let mut ui = ui();
+    patch(&mut ui, |p| {
+        p.op_create(1, kind::SCROLL);
+        p.op_create(2, kind::GRID);
+        p.op_append(1, 2);
+        for i in 0..n {
+            p.op_create(100 + i, kind::BUTTON);
+            p.op_set(100 + i, prop::button::LABEL);
+            p.value(&Value::Str("row"));
+            p.op_append(2, 100 + i);
+        }
+        p.op_root(1);
+    });
+    ui
+}
+
+fn scroll_y(ui: &Ui, id: u32) -> f32 {
+    match &ui.nodes[&id].st {
+        crate::ui::State::Scroll(s) => s.y,
+        _ => panic!("not a scroll"),
+    }
+}
+
+#[test]
+fn rows_added_above_the_view_keep_it_in_place() {
+    use qa_proto::{kind, prop, Sink, Value};
+    let mut ui = long_list(60);
+    ui.take_events();
+    assert!(ui.scroll_by(1, 0.0, 700.0));
+    let probe = (100..160).find(|i| ui.nodes[i].rect.y >= 0.0).unwrap();
+    let before = ui.nodes[&probe].rect.y;
+    patch(&mut ui, |p| {
+        for i in 0..5 {
+            p.op_create(200 + i, kind::BUTTON);
+            p.op_set(200 + i, prop::button::LABEL);
+            p.value(&Value::Str("older"));
+            p.op_insert(2, 200 + i, 100);
+        }
+    });
+    assert!((ui.nodes[&probe].rect.y - before).abs() < 0.5, "{} moved to {}", before, ui.nodes[&probe].rect.y);
+    assert!(scroll_y(&ui, 1) > 700.0);
+    // A row growing above the view doesn't move it either.
+    patch(&mut ui, |p| {
+        p.op_set(101, prop::MIN_H);
+        p.value(&Value::F32(200.0));
+    });
+    assert!((ui.nodes[&probe].rect.y - before).abs() < 0.5);
+}
+
+#[test]
+fn scrolls_report_near_start_and_near_end() {
+    let mut ui = long_list(60);
+    let evs = ui.take_events();
+    assert!(evs.contains(&UiEvent::NearStart(1)), "{evs:?}");
+    assert!(!evs.contains(&UiEvent::NearEnd(1)));
+    ui.scroll_by(1, 0.0, 1e9);
+    assert!(ui.take_events().contains(&UiEvent::NearEnd(1)));
+    // Once only, until the user leaves the start and comes back.
+    ui.scroll_by(1, 0.0, -1e9);
+    assert!(ui.take_events().contains(&UiEvent::NearStart(1)));
+    ui.scroll_by(1, 0.0, -10.0);
+    assert!(ui.take_events().is_empty());
+}
+
+#[test]
+fn stick_end_follows_new_rows() {
+    use qa_proto::{kind, prop, Sink};
+    let mut ui = long_list(60);
+    patch(&mut ui, |p| set_i(p, 1, prop::scroll::STICK_END, 1));
+    ui.scroll_by(1, 0.0, 1e9);
+    let end = scroll_y(&ui, 1);
+    patch(&mut ui, |p| {
+        p.op_create(300, kind::BUTTON);
+        p.op_append(2, 300);
+    });
+    assert!(scroll_y(&ui, 1) > end);
+    let r = ui.nodes[&300].rect;
+    assert!(r.y + r.h <= 480.5);
+}
+
+#[test]
+fn wheel_notches_scroll_smoothly() {
+    let mut ui = long_list(60);
+    ui.pointer_move(100.0, 100.0);
+    ui.wheel(0.0, 56.0, true);
+    assert_eq!(scroll_y(&ui, 1), 0.0, "moves over the next frames, not at once");
+    let t0 = ui.scroll_clock + 16;
+    let mut t = t0;
+    let mut ys = Vec::new();
+    while ui.step_scrolls(t) {
+        ys.push(scroll_y(&ui, 1));
+        t += 16;
+        assert!(t < t0 + 2000, "never settles");
+    }
+    assert!((scroll_y(&ui, 1) - 56.0).abs() < 0.01);
+    assert!(ys.windows(2).all(|w| w[1] >= w[0]));
+    assert!(ys.len() > 3);
+    // Touchpad scrolling follows the fingers.
+    ui.wheel(0.0, 10.0, false);
+    assert!((scroll_y(&ui, 1) - 66.0).abs() < 0.01);
+}
+
+/// A button (2) in a column (1) whose context menu is popup 10 holding menu 11.
+fn with_menu(items: &str) -> Ui {
+    use qa_proto::{kind, prop, Sink, Value};
+    let mut ui = ui();
+    patch(&mut ui, |p| {
+        p.op_create(1, kind::GRID);
+        p.op_create(2, kind::BUTTON);
+        p.op_set(2, prop::button::LABEL);
+        p.value(&Value::Str("target"));
+        set_i(p, 2, prop::CONTEXT_MENU, 10);
+        p.op_append(1, 2);
+        p.op_create(3, kind::BUTTON);
+        p.op_append(1, 3);
+        p.op_root(1);
+        p.op_create(10, kind::POPUP);
+        p.op_create(11, kind::MENU);
+        p.op_set(11, prop::menu::ITEMS);
+        p.value(&Value::Str(items));
+        p.op_append(10, 11);
+    });
+    ui
+}
+
+fn right_click(ui: &mut Ui, x: f32, y: f32) {
+    ui.pointer_move(x, y);
+    ui.pointer_button(crate::platform::BUTTON_RIGHT, true, x, y);
+    ui.pointer_button(crate::platform::BUTTON_RIGHT, false, x, y);
+}
+
+#[test]
+fn right_click_opens_the_context_menu_and_a_choice_closes_it() {
+    let mut ui = with_menu("Reply\n-\n!Edit\nDelete\tDel");
+    let r = ui.nodes[&2].rect;
+    right_click(&mut ui, r.x + 10.0, r.y + 15.0);
+    ui.layout();
+    assert!(ui.is_open(10));
+    assert_eq!(ui.take_events(), vec![UiEvent::ContextMenu { node: 2, x: r.x + 10.0, y: r.y + 15.0 }]);
+    // It opens at the pointer, and the menu has focus.
+    let pr = ui.nodes[&10].rect;
+    assert_eq!((pr.x, pr.y), (r.x + 10.0, r.y + 15.0));
+    assert_eq!(ui.focus, 11);
+    // Disabled items and separators can't be chosen; Delete can.
+    let rects = ui.menu_rects(11);
+    let (_, edit, ok) = rects[2];
+    assert!(!ok);
+    click_at(&mut ui, edit.x + 5.0, edit.y + 3.0);
+    assert!(ui.is_open(10));
+    let (_, del, _) = rects[3];
+    click_at(&mut ui, del.x + 5.0, del.y + 3.0);
+    assert!(!ui.is_open(10));
+    assert_eq!(ui.take_events(), vec![UiEvent::Select(11, 3), UiEvent::Dismiss(10)]);
+}
+
+fn click_at(ui: &mut Ui, x: f32, y: f32) {
+    ui.pointer_move(x, y);
+    ui.pointer_button(crate::platform::BUTTON_LEFT, true, x, y);
+    ui.pointer_button(crate::platform::BUTTON_LEFT, false, x, y);
+}
+
+#[test]
+fn a_click_outside_or_escape_closes_a_popup() {
+    use qa_proto::prop;
+    let mut ui = with_menu("One\nTwo");
+    let r = ui.nodes[&2].rect;
+    right_click(&mut ui, r.x + 10.0, r.y + 5.0);
+    ui.layout();
+    ui.take_events();
+    // The click that closes it doesn't reach the button under it.
+    let b = ui.nodes[&3].rect;
+    click_at(&mut ui, b.x + b.w - 5.0, b.y + b.h / 2.0);
+    assert!(!ui.is_open(10));
+    assert_eq!(ui.take_events(), vec![UiEvent::Dismiss(10)]);
+    assert_eq!(ui.nodes[&10].i(prop::popup::OPEN, 0), 0);
+    // The app opens it next to a node; Esc closes it and focus goes back.
+    ui.set_focus(3, true);
+    let mut p = Vec::new();
+    set_i(&mut p, 10, prop::popup::ANCHOR, 2);
+    set_i(&mut p, 10, prop::popup::OPEN, 1);
+    ui.apply_patch(&p).unwrap();
+    ui.layout();
+    let pr = ui.nodes[&10].rect;
+    // Below it, as wide as it but kept 6 px inside the window.
+    assert!(pr.y >= r.y + r.h && pr.x == 6.0 && pr.w == 588.0, "{pr:?} under {r:?}");
+    assert_eq!(ui.focus, 11);
+    ui.key(crate::ui::edit::keys::ESCAPE, "", 0);
+    assert!(!ui.is_open(10));
+    assert_eq!(ui.focus, 3);
+    assert_eq!(ui.take_events(), vec![UiEvent::Dismiss(10)]);
+}
+
+#[test]
+fn menus_work_from_the_keyboard() {
+    use crate::ui::edit::{keys, SHIFT};
+    let mut ui = with_menu("!Gone\nCopy\n-\nPaste\nQuit");
+    ui.set_focus(2, true);
+    ui.key(keys::F10, "", SHIFT);
+    ui.layout();
+    assert!(ui.is_open(10));
+    assert_eq!(ui.take_events().len(), 1);
+    // The first enabled item is highlighted; Down skips the separator.
+    assert_eq!(ui.menu_hl(11), 1);
+    ui.key(keys::DOWN, "", 0);
+    assert_eq!(ui.menu_hl(11), 3);
+    ui.key('q' as u32, "q", 0);
+    assert_eq!(ui.menu_hl(11), 4);
+    ui.key(keys::RETURN, "\r", 0);
+    assert_eq!(ui.take_events(), vec![UiEvent::Select(11, 4), UiEvent::Dismiss(10)]);
+    assert_eq!(ui.focus, 2);
+}
+
+#[test]
+fn popups_must_stay_detached() {
+    use qa_proto::{kind, Sink};
+    let mut ui = with_menu("x");
+    let mut p = Vec::new();
+    p.op_append(1, 10);
+    assert!(ui.apply_patch(&p).is_err());
+    // Destroying an open popup closes it.
+    let r = ui.nodes[&2].rect;
+    right_click(&mut ui, r.x + 10.0, r.y + 5.0);
+    let mut p = Vec::new();
+    p.op_destroy(10);
+    ui.apply_patch(&p).unwrap();
+    ui.layout();
+    assert!(ui.popups.is_empty());
+    let _ = kind::POPUP;
+}
+
+#[test]
+fn rows_added_under_a_header_at_the_top_keep_the_view() {
+    use qa_proto::{kind, prop, Sink, Value};
+    // As in a chat: a "load older" button stays first, older rows go in after it.
+    let mut ui = long_list(60);
+    patch(&mut ui, |p| {
+        p.op_create(99, kind::BUTTON);
+        p.op_insert(2, 99, 100);
+    });
+    ui.scroll_by(1, 0.0, -1e9);
+    assert_eq!(scroll_y(&ui, 1), 0.0);
+    let probe = 105;
+    let before = ui.nodes[&probe].rect.y;
+    patch(&mut ui, |p| {
+        for i in 0..10 {
+            p.op_create(400 + i, kind::BUTTON);
+            p.op_set(400 + i, prop::button::LABEL);
+            p.value(&Value::Str("older"));
+            p.op_insert(2, 400 + i, 100);
+        }
+    });
+    assert!((ui.nodes[&probe].rect.y - before).abs() < 0.5, "{before} → {}", ui.nodes[&probe].rect.y);
+    assert!(scroll_y(&ui, 1) > 0.0);
+}

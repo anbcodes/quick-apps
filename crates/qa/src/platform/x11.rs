@@ -585,15 +585,15 @@ impl X11 {
                 let state = u16le(m, 28);
                 self.pointer_mods(state, out);
                 let (x, y) = (i16le(m, 24) as f32, i16le(m, 26) as f32);
-                let step = 30.0 * self.scale;
+                let step = super::WHEEL_STEP * self.scale;
                 match m[1] {
                     1 => out.push(PEvent::Button { button: super::BUTTON_LEFT, pressed, x, y }),
                     2 => out.push(PEvent::Button { button: super::BUTTON_MIDDLE, pressed, x, y }),
                     3 => out.push(PEvent::Button { button: super::BUTTON_RIGHT, pressed, x, y }),
-                    4 if pressed => out.push(PEvent::Scroll { dx: 0.0, dy: -step }),
-                    5 if pressed => out.push(PEvent::Scroll { dx: 0.0, dy: step }),
-                    6 if pressed => out.push(PEvent::Scroll { dx: -step, dy: 0.0 }),
-                    7 if pressed => out.push(PEvent::Scroll { dx: step, dy: 0.0 }),
+                    4 if pressed => out.push(PEvent::Scroll { dx: 0.0, dy: -step, wheel: true }),
+                    5 if pressed => out.push(PEvent::Scroll { dx: 0.0, dy: step, wheel: true }),
+                    6 if pressed => out.push(PEvent::Scroll { dx: -step, dy: 0.0, wheel: true }),
+                    7 if pressed => out.push(PEvent::Scroll { dx: step, dy: 0.0, wheel: true }),
                     _ => {}
                 }
             }

@@ -65,6 +65,20 @@ pub fn ui_event(e: &UiEvent, tag: i32) -> Vec<u8> {
             b.u8(ev::DOUBLE_CLICK);
             b.u32(*n);
         }
+        UiEvent::NearStart(n) => {
+            b.u8(ev::NEAR_START);
+            b.u32(*n);
+        }
+        UiEvent::ContextMenu { node, x, y } => {
+            b.u8(ev::CONTEXT_MENU);
+            b.u32(*node);
+            b.f32(*x);
+            b.f32(*y);
+        }
+        UiEvent::Dismiss(n) => {
+            b.u8(ev::DISMISS);
+            b.u32(*n);
+        }
     }
     // Every node event ends with the node's tag.
     b.i32(tag);

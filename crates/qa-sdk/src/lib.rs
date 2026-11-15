@@ -236,6 +236,29 @@ impl Ui {
     pub fn divider(&mut self) -> B<'_> {
         self.create(kind::DIVIDER)
     }
+    /// A popup: shown over everything else when opened (`open`,
+    /// `context_menu`). Give it one child, and leave it detached.
+    pub fn popup(&mut self) -> B<'_> {
+        self.create(kind::POPUP)
+    }
+    /// A menu. `items` has one item per line: `-` is a separator, a leading
+    /// `!` disables an item, `*` checks it, and text after a tab is a
+    /// shortcut hint. Choosing one sends `Select(menu, line)`.
+    pub fn menu(&mut self, items: &str) -> B<'_> {
+        self.create(kind::MENU).str(prop::menu::ITEMS, items)
+    }
+    /// Shows a popup next to `anchor`. `Node(0)` places it at the pointer.
+    pub fn open(&mut self, popup: Node, anchor: Node) {
+        self.set(popup, prop::popup::ANCHOR, anchor.0 as i32);
+        self.set(popup, prop::popup::OPEN, 1);
+    }
+    /// Hides a popup. The runtime also closes popups itself and then sends `Dismiss`.
+    pub fn close(&mut self, popup: Node) {
+        self.set(popup, prop::popup::OPEN, 0);
+    }
+    pub fn set_items(&mut self, menu: Node, items: &str) {
+        self.set_str(menu, prop::menu::ITEMS, items);
+    }
 
     pub fn set(&mut self, n: Node, p: u16, v: i32) {
         self.buf.op_set(n.0, p);
@@ -434,6 +457,15 @@ impl<'a> B<'a> {
     pub fn tooltip(self, v: &str) -> Self {
         self.str(prop::TOOLTIP, v)
     }
+    /// Right-clicking this node (or something inside it) opens `popup` at
+    /// the pointer, after a `ContextMenu` event naming this node.
+    pub fn context_menu(self, popup: Node) -> Self {
+        self.int(prop::CONTEXT_MENU, popup.0 as i32)
+    }
+    /// Popups: 0 below the anchor, 1 above, 2 right, 3 left.
+    pub fn placement(self, p: i32) -> Self {
+        self.int(prop::popup::PLACEMENT, p)
+    }
     /// A number sent back with this node's events, read with `Ui::tag`.
     pub fn tag(self, t: i32) -> Self {
         self.int(prop::TAG, t)
@@ -551,6 +583,13 @@ pub enum Event<'a> {
     Activate,
     FocusOut(Node),
     NearEnd(Node),
+    /// A scroll came within one viewport of its start (load older rows).
+    NearStart(Node),
+    /// A right-click (or the Menu key) on a node with a `context_menu`.
+    /// The popup opens right after; change its content here.
+    ContextMenu { node: Node, x: f32, y: f32 },
+    /// The runtime closed a popup: Esc, a click outside, or a menu choice.
+    Dismiss(Node),
     /// A link span was clicked: the node and the span's index.
     Link(Node, u32),
     /// The second of two quick clicks on a button, checkbox or clickable grid.
@@ -597,6 +636,9 @@ pub fn __decode(b: &[u8]) -> (Event<'_>, i32) {
             ev::NEAR_END => Event::NearEnd(n(&mut r)?),
             ev::LINK => Event::Link(n(&mut r)?, r.u32()?),
             ev::DOUBLE_CLICK => Event::DoubleClick(n(&mut r)?),
+            ev::NEAR_START => Event::NearStart(n(&mut r)?),
+            ev::CONTEXT_MENU => Event::ContextMenu { node: n(&mut r)?, x: r.f32()?, y: r.f32()? },
+            ev::DISMISS => Event::Dismiss(n(&mut r)?),
             _ => Event::Unknown,
         };
         // Events that name a node end with that node's tag.

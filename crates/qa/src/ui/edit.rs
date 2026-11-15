@@ -17,6 +17,8 @@ pub mod keys {
     pub const KP_ENTER: u32 = 0xff8d;
     pub const ISO_LEFT_TAB: u32 = 0xfe20;
     pub const SPACE: u32 = 0x20;
+    pub const MENU: u32 = 0xff67;
+    pub const F10: u32 = 0xffc7;
 }
 
 pub const SHIFT: u8 = 1;

@@ -25,12 +25,13 @@ typedef unsigned char qa_u8;
 
 /* ---- ids (docs/ui-tree.md, docs/components.md, docs/events.md) ---- */
 enum { QA_GRID = 1, QA_TEXT = 2, QA_IMAGE = 3, QA_CANVAS = 4, QA_SCROLL = 5, QA_BUTTON = 10, QA_INPUT = 11,
-       QA_CHECKBOX = 12, QA_SELECT = 13, QA_TABS = 14, QA_PROGRESS = 15, QA_DIVIDER = 16 };
+       QA_CHECKBOX = 12, QA_SELECT = 13, QA_TABS = 14, QA_PROGRESS = 15, QA_DIVIDER = 16,
+       QA_POPUP = 17, QA_MENU = 18 };
 
 enum { /* common props */
        QA_ROW = 1, QA_COL = 2, QA_ROW_SPAN = 3, QA_COL_SPAN = 4, QA_PRIORITY = 5, QA_MIN_W = 6, QA_MIN_H = 7,
        QA_MAX_W = 8, QA_MAX_H = 9, QA_PAD = 10, QA_ALIGN_X = 11, QA_ALIGN_Y = 12, QA_HIDDEN = 13, QA_VARIANT = 14,
-       QA_TOOLTIP = 15, QA_TAG = 16, QA_DISABLED = 17,
+       QA_TOOLTIP = 15, QA_TAG = 16, QA_DISABLED = 17, QA_CONTEXT_MENU = 18,
        /* grid */ QA_GRID_COLS = 20, QA_GRID_ROWS = 21, QA_GRID_GAP = 22, QA_GRID_CLICKABLE = 23, QA_GRID_SELECTED = 24, QA_GRID_FLOW = 25,
        /* text */ QA_TEXT_TEXT = 20, QA_TEXT_WRAP = 21, QA_TEXT_STYLE = 22, QA_TEXT_ALIGN = 23, QA_TEXT_SELECTABLE = 24, QA_TEXT_MAX_LINES = 25, QA_TEXT_SPANS = 26,
        /* image */ QA_IMAGE_SRC = 20, QA_IMAGE_DATA = 21, QA_IMAGE_FIT = 22,
@@ -41,14 +42,16 @@ enum { /* common props */
        /* checkbox */ QA_CHECKBOX_LABEL = 20, QA_CHECKBOX_CHECKED = 21, QA_CHECKBOX_WRAP = 23,
        /* select */ QA_SELECT_OPTIONS = 20, QA_SELECT_SELECTED = 21, QA_SELECT_PLACEHOLDER = 22,
        /* tabs */ QA_TABS_LABELS = 20, QA_TABS_SELECTED = 21,
-       /* progress */ QA_PROGRESS_VALUE = 20 };
+       /* progress */ QA_PROGRESS_VALUE = 20,
+       /* popup */ QA_POPUP_OPEN = 20, QA_POPUP_ANCHOR = 21, QA_POPUP_PLACEMENT = 22,
+       /* menu */ QA_MENU_ITEMS = 20 };
 
 enum { QA_STRETCH = 0, QA_START = 1, QA_CENTER = 2, QA_END = 3 };
 
 enum { QA_EV_RESIZE = 1, QA_EV_CLICK = 2, QA_EV_CHANGE = 3, QA_EV_SUBMIT = 4, QA_EV_TOGGLE = 5, QA_EV_SELECT = 6,
        QA_EV_KEY = 7, QA_EV_POINTER = 8, QA_EV_TIMER = 9, QA_EV_HTTP = 10, QA_EV_WS = 11, QA_EV_MESSAGE = 12,
        QA_EV_REQUEST_DONE = 13, QA_EV_CLOSE = 14, QA_EV_ACTIVATE = 15, QA_EV_FOCUS_OUT = 16, QA_EV_NEAR_END = 17,
-       QA_EV_LINK = 18, QA_EV_DOUBLE_CLICK = 19 };
+       QA_EV_LINK = 18, QA_EV_DOUBLE_CLICK = 19, QA_EV_NEAR_START = 20, QA_EV_CONTEXT_MENU = 21, QA_EV_DISMISS = 22 };
 
 enum { QA_KEY_BACKSPACE = 0xff08, QA_KEY_TAB = 0xff09, QA_KEY_RETURN = 0xff0d, QA_KEY_ESCAPE = 0xff1b,
        QA_KEY_DELETE = 0xffff, QA_KEY_LEFT = 0xff51, QA_KEY_UP = 0xff52, QA_KEY_RIGHT = 0xff53, QA_KEY_DOWN = 0xff54 };
@@ -64,7 +67,8 @@ enum { QA_READ = 1, QA_WRITE = 2, QA_CREATE = 4, QA_TRUNC = 8, QA_APPEND = 16, Q
 /* ---- events ---- */
 /* One decoded event. Which fields are set depends on `type`:
  *   RESIZE        w, h, scale
- *   CLICK, DOUBLE_CLICK, FOCUS_OUT, NEAR_END   node
+ *   CLICK, DOUBLE_CLICK, FOCUS_OUT, NEAR_END, NEAR_START, DISMISS   node
+ *   CONTEXT_MENU  node, x, y
  *   CHANGE, SUBMIT   node, text
  *   TOGGLE        node, value (0/1)
  *   SELECT        node, value (index)
@@ -114,6 +118,10 @@ qa_node qa_image(const char *src);
 qa_node qa_canvas(int px_w, int px_h);
 qa_node qa_progress(float v);
 qa_node qa_divider(void);
+qa_node qa_popup(void);                 /* leave it detached; give it one child */
+qa_node qa_menu(const char *items);     /* one per line; see docs/components.md */
+void qa_open(qa_node popup, qa_node anchor); /* anchor 0: at the pointer */
+void qa_close(qa_node popup);
 
 void qa_root(qa_node n);
 qa_node qa_add(qa_node parent, qa_node child); /* appends; returns child */
@@ -337,6 +345,13 @@ qa_node qa_progress(float v) {
     return n;
 }
 qa_node qa_divider(void) { return qa_create(QA_DIVIDER); }
+qa_node qa_popup(void) { return qa_create(QA_POPUP); }
+qa_node qa_menu(const char *s) { return qa__with(QA_MENU, QA_MENU_ITEMS, s); }
+void qa_open(qa_node popup, qa_node anchor) {
+    qa_set_i(popup, QA_POPUP_ANCHOR, (int)anchor);
+    qa_set_i(popup, QA_POPUP_OPEN, 1);
+}
+void qa_close(qa_node popup) { qa_set_i(popup, QA_POPUP_OPEN, 0); }
 
 void qa_root(qa_node n) { qa__op1(8, n); }
 qa_node qa_add(qa_node parent, qa_node child) {
@@ -493,7 +508,9 @@ __attribute__((export_name("qa_event"))) void qa__x_event(const qa_u8 *p, qa_u32
     int has_node = 1;
     switch (e.type) {
     case QA_EV_RESIZE: e.w = qa__rf(&r), e.h = qa__rf(&r), e.scale = qa__rf(&r), has_node = 0; break;
-    case QA_EV_CLICK: case QA_EV_DOUBLE_CLICK: case QA_EV_FOCUS_OUT: case QA_EV_NEAR_END: e.node = qa__r32(&r); break;
+    case QA_EV_CLICK: case QA_EV_DOUBLE_CLICK: case QA_EV_FOCUS_OUT: case QA_EV_NEAR_END:
+    case QA_EV_NEAR_START: case QA_EV_DISMISS: e.node = qa__r32(&r); break;
+    case QA_EV_CONTEXT_MENU: e.node = qa__r32(&r), e.x = qa__rf(&r), e.y = qa__rf(&r); break;
     case QA_EV_CHANGE: case QA_EV_SUBMIT: e.node = qa__r32(&r), QA__TEXT(e, &r); break;
     case QA_EV_TOGGLE: e.node = qa__r32(&r), e.value = qa__r8(&r); break;
     case QA_EV_SELECT: case QA_EV_LINK: e.node = qa__r32(&r), e.value = (int)qa__r32(&r); break;

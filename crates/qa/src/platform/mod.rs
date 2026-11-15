@@ -79,13 +79,19 @@ pub enum PEvent {
     PointerLeave,
     Button { button: u32, pressed: bool, x: f32, y: f32 },
     /// Scroll deltas in physical pixels. Positive `dy` scrolls down.
-    Scroll { dx: f32, dy: f32 },
+    /// `wheel`: a mouse wheel's notches (animated), not touchpad fingers.
+    Scroll { dx: f32, dy: f32, wheel: bool },
+    /// The fingers left the touchpad.
+    ScrollEnd,
     Key { sym: u32, text: String, pressed: bool, repeat: bool, mods: u8 },
     Mods(u8),
     FocusIn,
     FocusOut,
     Paste(String),
 }
+
+/// How far one mouse wheel notch scrolls, logical px.
+pub const WHEEL_STEP: f32 = 56.0;
 
 pub const BUTTON_LEFT: u32 = 0x110;
 pub const BUTTON_RIGHT: u32 = 0x111;

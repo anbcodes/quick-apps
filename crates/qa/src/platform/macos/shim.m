@@ -151,8 +151,11 @@ static unsigned symForKeyCode(unsigned short k) {
 - (void)scrollWheel:(NSEvent *)e {
     double s = scaleFactor();
     // Cocoa's deltas are positive when the content moves down; ours are positive when it moves up.
-    double k = e.hasPreciseScrollingDeltas ? s : 12.0 * s;
-    QaEv ev = {.kind = EV_SCROLL, .a = -e.scrollingDeltaX * k, .b = -e.scrollingDeltaY * k};
+    // Precise deltas (trackpads, Magic Mouse) come with the system's own
+    // momentum; a plain wheel's lines are animated by the runtime.
+    int wheel = !e.hasPreciseScrollingDeltas;
+    double k = wheel ? 16.0 * s : s;
+    QaEv ev = {.kind = EV_SCROLL, .a = -e.scrollingDeltaX * k, .b = -e.scrollingDeltaY * k, .c = wheel};
     push(ev);
 }
 

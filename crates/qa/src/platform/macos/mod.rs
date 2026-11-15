@@ -98,7 +98,7 @@ impl Mac {
                     3 => PEvent::PointerMove { x: e.a as f32, y: e.b as f32 },
                     4 => PEvent::PointerLeave,
                     5 => PEvent::Button { button: e.button, pressed: e.pressed != 0, x: e.a as f32, y: e.b as f32 },
-                    6 => PEvent::Scroll { dx: e.a as f32, dy: e.b as f32 },
+                    6 => PEvent::Scroll { dx: e.a as f32, dy: e.b as f32, wheel: e.c != 0.0 },
                     7 => PEvent::Key { sym: e.sym, text, pressed: e.pressed != 0, repeat: e.repeat != 0, mods: e.mods as u8 },
                     8 => PEvent::Mods(e.mods as u8),
                     9 => PEvent::FocusIn,

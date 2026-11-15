@@ -107,6 +107,11 @@ pub struct Wayland {
     input_serial: u32,
     cursor: Cursor,
     scroll: (f32, f32),
+    /// This pointer frame's wheel notches, in 120ths.
+    scroll120: (i32, i32),
+    /// 0 wheel, 1 finger, 2 continuous, 3 wheel tilt; u32::MAX unknown.
+    axis_source: u32,
+    axis_stop: bool,
 
     xkb: Option<xkb::Xkb>,
     repeat: (i32, i32),
@@ -199,6 +204,9 @@ impl Wayland {
             input_serial: 0,
             cursor: Cursor::Default,
             scroll: (0.0, 0.0),
+            scroll120: (0, 0),
+            axis_source: u32::MAX,
+            axis_stop: false,
             xkb: xkb::Xkb::load(),
             repeat: (25, 600),
             repeat_key: 0,
@@ -271,7 +279,7 @@ impl Wayland {
                 "wp_fractional_scale_manager_v1" => self.g.frac_mgr = bind(self, Obj::Other, 1),
                 "wp_cursor_shape_manager_v1" => self.g.cursor_mgr = bind(self, Obj::Other, 1),
                 "wl_seat" if self.g.seat.0 == 0 => {
-                    let v = ver.min(7);
+                    let v = ver.min(8);
                     self.g.seat = (bind(self, Obj::Seat, v), v);
                 }
                 "xdg_toplevel_icon_manager_v1" => self.g.icon_mgr = bind(self, Obj::Other, 1),
@@ -481,6 +489,30 @@ impl Wayland {
 
     fn seat_caps(&mut self, caps: u32) {
         let seat = self.g.seat.0;
+        // A device went away (a mouse unplugged): its object is dead, so a
+        // new one is needed when the capability comes back.
+        if caps & 1 == 0 && self.pointer != 0 {
+            if self.cursor_dev != 0 {
+                self.c.send(self.cursor_dev, 0, &[]);
+                self.objs.remove(&self.cursor_dev);
+                self.cursor_dev = 0;
+            }
+            if self.g.seat.1 >= 3 {
+                self.c.send(self.pointer, 1, &[]);
+            }
+            self.objs.remove(&self.pointer);
+            self.pointer = 0;
+            self.scroll = (0.0, 0.0);
+            self.scroll120 = (0, 0);
+        }
+        if caps & 2 == 0 && self.keyboard != 0 {
+            if self.g.seat.1 >= 3 {
+                self.c.send(self.keyboard, 0, &[]);
+            }
+            self.objs.remove(&self.keyboard);
+            self.keyboard = 0;
+            self.set_repeat(0);
+        }
         if caps & 1 != 0 && self.pointer == 0 {
             self.pointer = self.new_obj(Obj::Pointer);
             self.c.send(seat, 0, &[Arg::N(self.pointer)]);
@@ -539,8 +571,32 @@ impl Wayland {
             }
             5 => {
                 let (dx, dy) = std::mem::take(&mut self.scroll);
-                if dx != 0.0 || dy != 0.0 {
-                    out.push(PEvent::Scroll { dx, dy });
+                let (nx, ny) = std::mem::take(&mut self.scroll120);
+                let src = std::mem::replace(&mut self.axis_source, u32::MAX);
+                if nx != 0 || ny != 0 {
+                    // Wheel notches: the same distance whatever the compositor's axis values.
+                    let k = super::WHEEL_STEP * self.scale() as f32 / 120.0;
+                    out.push(PEvent::Scroll { dx: nx as f32 * k, dy: ny as f32 * k, wheel: true });
+                } else if dx != 0.0 || dy != 0.0 {
+                    out.push(PEvent::Scroll { dx, dy, wheel: src == 0 || src == 3 });
+                }
+                if std::mem::take(&mut self.axis_stop) {
+                    out.push(PEvent::ScrollEnd);
+                }
+            }
+            6 => self.axis_source = r.u32(),
+            7 => {
+                let _time = r.u32();
+                let _axis = r.u32();
+                self.axis_stop = true;
+            }
+            9 => {
+                let axis = r.u32();
+                let v = r.u32() as i32;
+                if axis == 0 {
+                    self.scroll120.1 += v;
+                } else {
+                    self.scroll120.0 += v;
                 }
             }
             _ => {}
@@ -548,7 +604,7 @@ impl Wayland {
         // Pointers older than v5 have no frame event.
         if op == 4 && self.g.seat.1 < 5 {
             let (dx, dy) = std::mem::take(&mut self.scroll);
-            out.push(PEvent::Scroll { dx, dy });
+            out.push(PEvent::Scroll { dx, dy, wheel: true });
         }
     }
 

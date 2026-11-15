@@ -74,14 +74,14 @@ impl Paint {
         let width = (width * self.s).round().max(1.0);
         self.list.push(Cmd::Stroke { rect, color: self.col(c), radius: radius * self.s, width });
     }
-    fn clip(&mut self, r: RectF, radius: f32) -> RectF {
+    pub(crate) fn clip(&mut self, r: RectF, radius: f32) -> RectF {
         let old = self.clip;
         self.clip = intersect(&self.clip, &r);
         let rect = self.snap(r);
         self.list.push(Cmd::Clip { rect, radius: radius * self.s });
         old
     }
-    fn unclip(&mut self, old: RectF) {
+    pub(crate) fn unclip(&mut self, old: RectF) {
         self.clip = old;
         self.list.push(Cmd::Unclip);
     }
@@ -105,6 +105,8 @@ impl Ui {
         if self.root != 0 && self.nodes.contains_key(&self.root) {
             self.paint_node(&mut p, self.root);
         }
+        self.paint_popups(&mut p);
+        // A select's list is on top, as a select can be inside a popup.
         self.paint_popup(&mut p);
         p.list
     }
@@ -424,7 +426,7 @@ impl Ui {
         }
     }
 
-    fn paint_node(&mut self, p: &mut Paint, id: u32) {
+    pub(crate) fn paint_node(&mut self, p: &mut Paint, id: u32) {
         let n = &self.nodes[&id];
         if n.hidden() {
             return;
@@ -448,6 +450,7 @@ impl Ui {
             kind::SELECT => self.paint_select(p, id),
             kind::TABS => self.paint_tabs(p, id),
             kind::PROGRESS => self.paint_progress(p, id),
+            kind::MENU => self.paint_menu(p, id),
             kind::IMAGE | kind::CANVAS => self.paint_pixels(p, id),
             kind::DIVIDER => {
                 let c = self.color(id, &["color.border"]);

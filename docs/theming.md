@@ -43,6 +43,8 @@ changes above the node.
 | `color.focus` | `#0969da` | Focus ring |
 | `color.link` | `color.accent` | Link spans in text |
 | `color.code_bg` | `color.surface` | Background of code spans |
+| `popup.bg`, `popup.border`, `popup.radius`, `popup.shadow` | `color.bg`, `color.border`, `radius`, `#00000022` | Popups and menus |
+| `menu.highlight` | `color.selection` | The highlighted menu item |
 | `font.family` | first found of DejaVu Sans, Noto Sans, Liberation Sans | Path or file name |
 | `font.mono.family` | DejaVu Sans Mono, … | |
 | `font.fallback` | DejaVu Sans, Noto Sans, Noto symbols, … ([rendering.md](rendering.md#text)) | Comma-separated fonts for characters the main font lacks |

@@ -3,7 +3,7 @@
 use super::edit::{keys, EditResult, CTRL, SHIFT};
 use super::{State, Ui, UiEvent};
 use crate::gfx::RectF;
-use crate::platform::{Cursor, BUTTON_LEFT};
+use crate::platform::{Cursor, BUTTON_LEFT, BUTTON_RIGHT};
 use qa_proto::{kind, prop};
 
 pub(crate) enum Drag {
@@ -45,10 +45,22 @@ fn now_ms() -> u64 {
 }
 
 impl Ui {
-    /// The path from the root to the deepest visible node under (x, y).
+    /// The path from the root (or the open popup) to the deepest visible
+    /// node under (x, y). While a popup is open, nothing outside popups is hit.
     pub fn hit_path(&self, x: f32, y: f32) -> Vec<u32> {
+        if !self.popups.is_empty() {
+            let top = self.popups.iter().rev().find(|p| self.nodes.get(&p.id).is_some_and(|n| n.rect.contains(x, y)));
+            return match top {
+                Some(p) => self.hit_from(p.id, x, y),
+                None => Vec::new(),
+            };
+        }
+        self.hit_from(self.root, x, y)
+    }
+
+    fn hit_from(&self, start: u32, x: f32, y: f32) -> Vec<u32> {
         let mut path = Vec::new();
-        let mut cur = self.root;
+        let mut cur = start;
         loop {
             let Some(n) = self.nodes.get(&cur) else { break };
             if n.hidden() || !n.rect.contains(x, y) {
@@ -70,7 +82,7 @@ impl Ui {
     fn interactive(&self, id: u32) -> bool {
         let n = &self.nodes[&id];
         match n.kind {
-            kind::BUTTON | kind::INPUT | kind::CHECKBOX | kind::SELECT | kind::TABS | kind::CANVAS => true,
+            kind::BUTTON | kind::INPUT | kind::CHECKBOX | kind::SELECT | kind::TABS | kind::CANVAS | kind::MENU => true,
             kind::GRID => n.i(prop::grid::CLICKABLE, 0) != 0,
             kind::TEXT => false,
             _ => false,
@@ -121,7 +133,7 @@ impl Ui {
             None if self.selectable_text_at(x, y).is_some() => Cursor::Text,
             Some(_) if off => Cursor::Default,
             Some(n) if n.kind == kind::INPUT => Cursor::Text,
-            Some(n) if n.kind == kind::CANVAS => Cursor::Default,
+            Some(n) if n.kind == kind::CANVAS || n.kind == kind::MENU => Cursor::Default,
             Some(_) => Cursor::Pointer,
             None => Cursor::Default,
         };
@@ -214,6 +226,11 @@ impl Ui {
             if n.kind == kind::CANVAS {
                 let h = self.hover;
                 self.canvas_pointer(h, 2, x, y, 0.0, 0.0);
+            } else if n.kind == kind::MENU {
+                let h = self.hover;
+                if let Some(i) = self.menu_item_at(h, x, y) {
+                    self.set_menu_hl(h, i);
+                }
             }
         }
     }
@@ -290,6 +307,21 @@ impl Ui {
                 }
             }
             return;
+        }
+        if pressed && !self.popups.is_empty() && self.hit_path(x, y).is_empty() {
+            // A press outside the popups closes them. A right-click goes on
+            // to open the menu for what is under it.
+            self.close_all_popups(true);
+            if button != BUTTON_RIGHT {
+                return;
+            }
+        }
+        if pressed && button == BUTTON_RIGHT {
+            if let Some(&deep) = self.hit_path(x, y).last() {
+                if self.context_menu(deep, x, y, false) {
+                    return;
+                }
+            }
         }
         if pressed {
             // A press on a scrollbar thumb drags it.
@@ -418,7 +450,11 @@ impl Ui {
             self.damage_node(p);
             let t = self.target_at(x, y);
             if t == p && button == BUTTON_LEFT {
-                if self.nodes[&p].kind == kind::TEXT {
+                if self.nodes[&p].kind == kind::MENU {
+                    if let Some(i) = self.menu_item_at(p, x, y) {
+                        self.menu_choose(p, i);
+                    }
+                } else if self.nodes[&p].kind == kind::TEXT {
                     if let Some(i) = self.link_at(p, x, y) {
                         self.out.push(UiEvent::Link(p, i));
                     }
@@ -479,7 +515,9 @@ impl Ui {
         let _ = keyboard;
     }
 
-    pub fn wheel(&mut self, dx: f32, dy: f32) {
+    /// Wheel or touchpad scrolling, logical px. `smooth` (a mouse wheel)
+    /// animates the move; touchpad scrolling follows the fingers.
+    pub fn wheel(&mut self, dx: f32, dy: f32, smooth: bool) {
         let (x, y) = self.ptr;
         if let Some(n) = self.nodes.get(&self.hover) {
             if n.kind == kind::CANVAS {
@@ -490,20 +528,105 @@ impl Ui {
         }
         // Shift turns vertical wheels into horizontal scrolling.
         let (dx, dy) = if self.mods & SHIFT != 0 && dx == 0.0 { (dy, 0.0) } else { (dx, dy) };
+        let vs = if dy != 0.0 { self.scroll_at(x, y, true) } else { None };
+        let hs = if dx != 0.0 { self.scroll_at(x, y, false) } else { None };
+        let now = now_ms();
         let mut moved = false;
-        if dy != 0.0 {
-            if let Some(s) = self.scroll_at(x, y, true) {
-                moved |= self.scroll_by(s, 0.0, dy);
-            }
-        }
-        if dx != 0.0 {
-            if let Some(s) = self.scroll_at(x, y, false) {
-                moved |= self.scroll_by(s, dx, 0.0);
+        for (s, mx, my) in [(vs, 0.0, dy), (hs, dx, 0.0)] {
+            let Some(s) = s else { continue };
+            let Some(st) = self.nodes.get_mut(&s).and_then(|n| n.scroll()) else { continue };
+            st.vel = (0.0, 0.0);
+            if smooth {
+                // Reversing direction drops what was left of the last move.
+                if st.pending.1 * my < 0.0 {
+                    st.pending.1 = 0.0;
+                }
+                if st.pending.0 * mx < 0.0 {
+                    st.pending.0 = 0.0;
+                }
+                st.pending.0 += mx;
+                st.pending.1 += my;
+                if self.scrolling.is_empty() {
+                    self.scroll_clock = now.saturating_sub(16);
+                }
+                if !self.scrolling.contains(&s) {
+                    self.scrolling.push(s);
+                }
+            } else {
+                st.pending = (0.0, 0.0);
+                moved |= self.scroll_by(s, mx, my);
+                // Track the fingers' speed for a flick.
+                let (v, at) = match self.fling {
+                    Some((fs, t, v)) if fs == s && now.saturating_sub(t) < 80 => (v, t),
+                    _ => ((0.0, 0.0), now.saturating_sub(16)),
+                };
+                let dt = now.saturating_sub(at).max(4) as f32;
+                let inst = (mx / dt, my / dt);
+                let v = if mx != 0.0 { (v.0 * 0.4 + inst.0 * 0.6, v.1) } else { (v.0, v.1 * 0.4 + inst.1 * 0.6) };
+                self.fling = Some((s, now, v));
             }
         }
         if moved {
             self.update_hover(x, y);
         }
+    }
+
+    /// The fingers left the touchpad: a quick flick keeps scrolling.
+    pub fn wheel_end(&mut self) {
+        let Some((s, t, v)) = self.fling.take() else { return };
+        let now = now_ms();
+        if now.saturating_sub(t) > 60 || (v.0.abs() < 0.3 && v.1.abs() < 0.3) {
+            return;
+        }
+        let v = (v.0.clamp(-8.0, 8.0), v.1.clamp(-8.0, 8.0));
+        if let Some(st) = self.nodes.get_mut(&s).and_then(|n| n.scroll()) {
+            st.vel = v;
+            if self.scrolling.is_empty() {
+                self.scroll_clock = now.saturating_sub(16);
+            }
+            if !self.scrolling.contains(&s) {
+                self.scrolling.push(s);
+            }
+        }
+    }
+
+    /// Advances smooth and kinetic scrolling. Returns whether more frames are needed.
+    pub fn step_scrolls(&mut self, now: u64) -> bool {
+        if self.scrolling.is_empty() {
+            return false;
+        }
+        let dt = now.saturating_sub(self.scroll_clock).clamp(1, 50) as f32;
+        self.scroll_clock = now;
+        let mut moved = false;
+        for id in std::mem::take(&mut self.scrolling) {
+            let Some(st) = self.nodes.get_mut(&id).and_then(|n| n.scroll()) else { continue };
+            let k = 1.0 - (-dt / 50.0).exp();
+            let step = |p: f32| if (p * (1.0 - k)).abs() < 0.5 { p } else { p * k };
+            let (px, py) = st.pending;
+            let (sx, sy) = (step(px), step(py));
+            st.pending = (px - sx, py - sy);
+            let (vx, vy) = st.vel;
+            let decay = (-dt / 325.0).exp();
+            let fade = |v: f32| if (v * decay).abs() < 0.02 { 0.0 } else { v * decay };
+            st.vel = (fade(vx), fade(vy));
+            let (mx, my) = (sx + vx * dt, sy + vy * dt);
+            let ok = self.scroll_by(id, mx, my);
+            moved |= ok;
+            let st = self.nodes.get_mut(&id).unwrap().scroll().unwrap();
+            if !ok {
+                st.pending = (0.0, 0.0);
+                st.vel = (0.0, 0.0);
+            } else if st.pending != (0.0, 0.0) || st.vel != (0.0, 0.0) {
+                self.scrolling.push(id);
+            }
+        }
+        if moved {
+            let (x, y) = self.ptr;
+            if x >= 0.0 && self.drag.is_none() {
+                self.update_hover(x, y);
+            }
+        }
+        !self.scrolling.is_empty()
     }
 
     pub fn paste(&mut self, text: String) {
@@ -565,6 +688,20 @@ impl Ui {
         if self.open_select != 0 {
             self.select_popup_key(sym);
             return;
+        }
+        if sym == keys::ESCAPE {
+            if let Some(top) = self.top_popup() {
+                self.close_popups_from(top, true);
+                return;
+            }
+        }
+        // The Menu key or Shift+F10 opens the focused node's context menu.
+        if (sym == keys::MENU || (sym == keys::F10 && mods & SHIFT != 0)) && self.focus != 0 {
+            let f = self.focus;
+            let r = self.nodes[&f].rect;
+            if self.context_menu(f, r.x + 8.0, r.y + r.h, true) {
+                return;
+            }
         }
         let input_focused = self.nodes.get(&self.focus).is_some_and(|n| n.kind == kind::INPUT);
         if ctrl && (sym == 0x63 || sym == 0x43) && !input_focused {
@@ -634,6 +771,11 @@ impl Ui {
                         }
                     }
                 }
+                kind::MENU if sym != keys::TAB && sym != keys::ISO_LEFT_TAB && mods & (CTRL | 4) == 0 => {
+                    if self.menu_key(f, sym, text) {
+                        return;
+                    }
+                }
                 kind::TABS => {
                     if sym == keys::LEFT || sym == keys::RIGHT {
                         let n = self.nodes[&f].s(prop::tabs::LABELS).split('\n').count() as i32;
@@ -685,8 +827,8 @@ impl Ui {
         }
         let (x, y) = self.ptr;
         self.scroll_at(x, y, true).or_else(|| {
-            // The first vertical scroll in the tree.
-            let mut stack = vec![self.root];
+            // The first vertical scroll in the tree (or the open popup).
+            let mut stack = vec![self.top_popup().unwrap_or(self.root)];
             while let Some(id) = stack.pop() {
                 let n = self.nodes.get(&id)?;
                 if n.kind == kind::SCROLL && !n.hidden() {

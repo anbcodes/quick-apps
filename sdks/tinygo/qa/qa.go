@@ -33,6 +33,8 @@ const (
 	KindTabs     = 14
 	KindProgress = 15
 	KindDivider  = 16
+	KindPopup    = 17
+	KindMenu     = 18
 )
 
 // Prop ids (docs/ui-tree.md and docs/components.md).
@@ -54,6 +56,7 @@ const (
 	PropTooltip  = 15
 	PropTag      = 16
 	PropDisabled = 17
+	PropContextMenu = 18
 
 	GridCols      = 20
 	GridRows      = 21
@@ -102,6 +105,12 @@ const (
 	TabsSelected = 21
 
 	ProgressValue = 20
+
+	PopupOpen      = 20
+	PopupAnchor    = 21
+	PopupPlacement = 22
+
+	MenuItems = 20
 )
 
 // Alignment within a grid cell.
@@ -133,6 +142,9 @@ const (
 	EvNearEnd     = 17
 	EvLink        = 18
 	EvDoubleClick = 19
+	EvNearStart   = 20
+	EvContextMenu = 21
+	EvDismiss     = 22
 )
 
 // Keysyms and modifier bits for EvKey.
@@ -359,6 +371,13 @@ func Scroll() B               { return Create(KindScroll) }
 func Image(src string) B      { return Create(KindImage).Str(ImageSrc, src) }
 func Progress(v float32) B    { return Create(KindProgress).Num(ProgressValue, v) }
 func Divider() B              { return Create(KindDivider) }
+
+// Popup is shown over everything when its PopupOpen is 1. Leave it
+// detached and give it one child.
+func Popup() B { return Create(KindPopup) }
+
+// Menu takes its items one per line (see docs/components.md).
+func Menu(items string) B { return Create(KindMenu).Str(MenuItems, items) }
 func Canvas(w, h int32) B     { return Create(KindCanvas).Int(CanvasPxW, w).Int(CanvasPxH, h) }
 
 // Select takes its options one per line.
@@ -372,7 +391,8 @@ func Tabs(labels string) B { return Create(KindTabs).Str(TabsLabels, labels) }
 // Event is one event. Which fields are set depends on Type:
 //
 //	EvResize       W, H, Scale
-//	EvClick, EvDoubleClick, EvFocusOut, EvNearEnd   Node
+//	EvClick, EvDoubleClick, EvFocusOut, EvNearEnd, EvNearStart, EvDismiss   Node
+//	EvContextMenu  Node, X, Y
 //	EvChange, EvSubmit   Node, Text
 //	EvToggle       Node, Value (0/1)
 //	EvSelect       Node, Value (index)
@@ -440,8 +460,11 @@ func Decode(buf []byte) Event {
 	case EvResize:
 		e.W, e.H, e.Scale = r.f32(), r.f32(), r.f32()
 		hasNode = false
-	case EvClick, EvDoubleClick, EvFocusOut, EvNearEnd:
+	case EvClick, EvDoubleClick, EvFocusOut, EvNearEnd, EvNearStart, EvDismiss:
 		e.Node = Node(r.u32())
+	case EvContextMenu:
+		e.Node = Node(r.u32())
+		e.X, e.Y = r.f32(), r.f32()
 	case EvChange, EvSubmit:
 		e.Node = Node(r.u32())
 		e.Text = r.str()

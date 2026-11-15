@@ -71,7 +71,7 @@ everything `Ui` buffered in **one** `ui_patch` call.
 | Area | API |
 |---|---|
 | App | `trait App { fn start(ui: &mut Ui) -> Self; fn event(&mut self, ui: &mut Ui, ev: Event); }` |
-| Create | `ui.grid()`, `text(s)`, `button(s)`, `input()`, `checkbox(s)`, `select(opts)`, `tabs(labels)`, `scroll()`, `image(src)`, `canvas(w, h)`, `progress(v)`, `divider()`: each returns a builder |
+| Create | `ui.grid()`, `text(s)`, `button(s)`, `input()`, `checkbox(s)`, `select(opts)`, `tabs(labels)`, `scroll()`, `image(src)`, `canvas(w, h)`, `progress(v)`, `divider()`, `popup()`, `menu(items)`: each returns a builder |
 | Builder | Chainable setters (`.cols()`, `.rows()`, `.gap()`, `.pad()`, `.at(row, col)`, `.span(r, c)`, `.priority()`, `.variant()`, `.style()`, `.ctx(key, val)`, …), finished by `.add_to(parent)`, `.root()` or `.detached()`. Each returns a `Node`. |
 | Update | `ui.set_text(n, s)`, `ui.set(n, prop::CHECKED, 1)`, `ui.hide(n, bool)`, `ui.set_disabled(n, bool)`, `ui.ctx(n, key, val)`, `ui.append(p, c)`, `ui.insert(p, c, before)`, `ui.replace(old, new)`, `ui.detach(n)`, `ui.destroy(n)`, `ui.focus(n)`, `ui.scroll_to(n)`, `ui.set_cols(n, tracks)`, `ui.set_rows(n, tracks)`, `ui.set_tag(n, t)` |
 | Tags | `.tag(i32)` on a builder; `ui.tag()` is the tag of the node the current event came from |
@@ -79,8 +79,9 @@ everything `Ui` buffered in **one** `ui_patch` call.
 | Lists | `List<K>`: children of one parent by key. `put` (append or replace in place), `insert(at)`, `remove`, `clear`, `get`, `key_of` |
 | Rich text | `Rich`: `push(s)`, `styled(s, span::BOLD \| span::LINK, variant) -> span index`, `mark(start, end, ..)`; then `ui.rich(&r)` or `ui.set_rich(n, &r)`. A click on a link span sends `Event::Link(node, index)`. |
 | Flow | `.flow(true)` on a grid: children wrap like words |
+| Popups | `ui.popup().detached()` with one child; `ui.open(popup, anchor)` (`Node(0)`: at the pointer), `ui.close(popup)`, `.placement(p)`. `.context_menu(popup)` on any builder opens it on right-click. `ui.set_items(menu, s)` changes a menu. |
 | Tracks | `px(n)`, `fr(n)`, `auto()`, with `.min(x)` / `.max(x)` |
-| Events | `enum Event<'a> { Resize{..}, Click(Node), Change(Node, &'a str), Submit(..), Toggle(..), Select(..), Key{..}, Pointer{..}, Timer(u32), Http{..}, Ws{..}, Message{..}, RequestDone{..}, Close, Activate, FocusOut(Node), NearEnd(Node), Link(Node, u32), DoubleClick(Node) }`: strings borrow from the event buffer |
+| Events | `enum Event<'a> { Resize{..}, Click(Node), Change(Node, &'a str), Submit(..), Toggle(..), Select(..), Key{..}, Pointer{..}, Timer(u32), Http{..}, Ws{..}, Message{..}, RequestDone{..}, Close, Activate, FocusOut(Node), NearEnd(Node), NearStart(Node), Link(Node, u32), DoubleClick(Node), ContextMenu{..}, Dismiss(Node) }`: strings borrow from the event buffer |
 | Files | `fs::read(dir, path) -> Result<Vec<u8>>`, `fs::write(dir, path, bytes)`, `fs::write_atomic(dir, path, bytes)` (writes `path.tmp`, then renames it over `path`), `fs::rename`, `fs::list(dir, path)`, `File` with `read`/`write`/`seek`, `APP_DIR` (= 0) |
 | Network | `net::get(url) -> ReqId`, `net::request(Request{..}) -> ReqId`, `net::ws(url) -> Ws`; helpers `net::form(&[(k, v)])`, `url_encode`, `url_decode`, `header(headers, name)` |
 | HTTP client | `net::Client<T>`: a queue that keeps at most `max` (6) requests in flight, drops a request identical to one still pending, retries 429/503 after `Retry-After`, and returns each response with the tag `T` it was sent with. `send`, `get`, `post_form`, `post_json`, `has(f)`, `cancel(f)`; call `handle(&ev)` first in `event` |
@@ -96,7 +97,14 @@ everything `Ui` buffered in **one** `ui_patch` call.
 Make each row a `clickable` grid with a `tag`, and use `variant("card")` or
 `selected` for looks. To change a row, `SET` its props, or build a new row and
 `replace` the old one. Don't rebuild the list. To delete, `destroy` the row's
-node. For long feeds, append rows on `NearEnd`.
+node. For long feeds, append rows on `NearEnd`, and insert older rows at the
+top on `NearStart`: the scroll keeps what is on screen in place.
+
+**Context menus.** Make one popup holding a `menu` and give each row
+`.context_menu(popup)`. On `ContextMenu { node, .. }`, look up the row and
+`set_items` for it; on `Select(menu, i)`, act on that row. The runtime closes
+the popup and sends `Dismiss`. A custom popup (a picker, a small form) is the
+same with a grid inside instead of a menu.
 
 **Editing in place.** On `DoubleClick`, `replace` the row's text or checkbox
 with an `input` holding its value and `focus` it. On `Submit` or `FocusOut`,

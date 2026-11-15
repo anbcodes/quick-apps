@@ -88,8 +88,19 @@ Has exactly one child.
 | 20 | `axis` | i32 | 0 vertical · 1 horizontal · 2 both |
 | 21 | `stick_end` | i32 | 0. When 1: stays pinned to the end while content grows (logs, chat). |
 
-Events: `NearEnd`. Tokens: scrollbar `color.scrollbar` → `color.border`. The
-scrollbar is a thin overlay that shows only while scrolling or on hover.
+Events: `NearStart`, `NearEnd`. Tokens: scrollbar `color.scrollbar` →
+`color.border`. The scrollbar is a thin overlay that shows only while
+scrolling or on hover.
+
+- **Anchoring.** When content changes size above what is on screen (rows
+  inserted at the top, an image loading, a row growing), the view stays on
+  the same rows: the runtime keeps the row a quarter of the way down the
+  view at the same place. A chat can insert older messages at the top on
+  `NearStart` without moving what the user is reading. `stick_end` wins
+  while the view is at the end.
+- **Wheel and touchpad.** A mouse wheel notch scrolls 56 px, animated over a
+  few frames. Touchpad scrolling follows the fingers, and a flick keeps
+  scrolling and slows down.
 
 ## button (10)
 
@@ -174,6 +185,55 @@ only built-in animation, and it asks for frames only while it is visible.
 A 1-px line. Its direction follows its cell: wider than tall means horizontal.
 Token: `color.border`.
 
+## popup (17)
+
+Shown over everything else while open, next to its anchor. A popup is never
+placed in a container: create it detached and give it one child (a `menu`, or
+any grid of nodes, such as a picker or a small form).
+
+| Id | Prop | Type | Default |
+|---|---|---|---|
+| 20 | `open` | i32 | 0. 1 shows it. The runtime sets it back to 0 when it closes the popup. |
+| 21 | `anchor` | i32 (node id) | 0: at the pointer when it opened |
+| 22 | `placement` | i32 | 0 below the anchor · 1 above · 2 right · 3 left. It flips to the other side when there is no room, and stays 6 px inside the window. |
+
+The common `pad` prop defaults to 4. A popup placed below or above its
+anchor is at least as wide as the anchor.
+
+While a popup is open it takes the pointer and the keyboard: focus moves to
+its first focusable node (and back when it closes), Tab stays inside it, and
+nothing outside it hovers or scrolls. **Esc** or a press outside closes the
+topmost popup and sends `Dismiss`. The press that closes it does nothing
+else, except a right-click, which goes on to open the context menu under it.
+A popup opened from inside another (a submenu) stacks on top; closing one
+closes those above it.
+
+Open one with `open` (the SDK's `ui.open(popup, anchor)`), or give any node a
+`context_menu` ([ui-tree.md](ui-tree.md)): a right-click on that node or
+inside it, or the Menu key or Shift+F10 while it has focus, opens the popup
+at the pointer and sends `ContextMenu` naming the node, so the app can fill
+in the popup for it.
+
+Tokens: bg `popup.bg` → `color.bg`; border `popup.border` → `color.border`;
+radius `popup.radius` → `radius`; shadow `popup.shadow`.
+
+## menu (18)
+
+A list of choices, usually the child of a popup.
+
+| Id | Prop | Type | Default |
+|---|---|---|---|
+| 20 | `items` | str | One item per line. `-` is a separator. A leading `!` disables an item and a leading `*` checks it (✓). Text after a tab is a shortcut hint, drawn on the right. |
+
+Choosing an item (click, or Enter/Space) sends `Select` with the item's line
+index (separators count) and closes the popups it is in. The pointer and
+Up/Down highlight items, Home/End go to the first and last, and a letter
+jumps to the next item starting with it. Disabled items and separators are
+skipped.
+
+Tokens: highlight `menu.highlight` → `color.selection`; hint and disabled
+text `color.muted`; check `color.accent`.
+
 ## Shared behavior
 
 - **Focus.** Interactive components and `clickable` grids are focusable in
@@ -190,6 +250,6 @@ Token: `color.border`.
 ## Not in v1
 
 These are list virtualization (use `NearEnd` and append rows), tables with
-sortable headers, menus, dialogs (build them from grids and `hidden`), rich
+sortable headers, dialogs (build them from a popup, or grids and `hidden`), rich
 text spans, icons, and sliders. Each one is a candidate for a later native
 component.

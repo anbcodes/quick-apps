@@ -3,7 +3,12 @@
 A small Slack client for Quick Apps, modeled on mtui's `mslack`. It shows
 channels and DMs, history with day separators, threads, reactions and clickable
 links (with *bold*, `code` and mentions styled), and it sends messages and thread replies. Outgoing `@name`, `#channel` and
-`@here` become real Slack mentions.
+`@here` become real Slack mentions. Older history loads as you scroll up,
+without moving what you're reading.
+
+Right-click a message to reply in a thread, add a reaction, copy its text or
+link, mark the channel unread from there, or delete your own message.
+Right-click a channel to mark it read or open it in Slack.
 
 ```sh
 ../../target/release/qa dev .
@@ -38,7 +43,8 @@ find them.
 |---|---|
 | `Enter` | send |
 | `Alt+Up` / `Alt+Down` | previous / next conversation |
-| `Esc` | close the thread |
+| `Esc` | close the thread, or an open menu |
+| `Menu` / `Shift+F10` | the focused message's or channel's menu |
 
 ## Testing without Slack
 
@@ -49,6 +55,7 @@ the internet grant for that run only:
 qa dev . --map https://slack.com/api/=http://127.0.0.1:8765/api/ --grant internet
 qa shot . --data /tmp/slack-test --map https://slack.com/api/=http://127.0.0.1:8765/api/ \
     --grant internet wait:1000 "click:2 replies" --out /tmp/slack.png
+qa shot . … wait:1000 "rclick:some message" "click:Add reaction…" --out /tmp/menu.png
 ```
 
 An `api <url>` line in `data/config` does the same from inside the app.

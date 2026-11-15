@@ -27,6 +27,8 @@ export namespace kind {
   export const TABS: u8 = 14;
   export const PROGRESS: u8 = 15;
   export const DIVIDER: u8 = 16;
+  export const POPUP: u8 = 17;
+  export const MENU: u8 = 18;
 }
 
 export namespace prop {
@@ -47,6 +49,7 @@ export namespace prop {
   export const TOOLTIP: u16 = 15;
   export const TAG: u16 = 16;
   export const DISABLED: u16 = 17;
+  export const CONTEXT_MENU: u16 = 18;
   export const GRID_COLS: u16 = 20;
   export const GRID_ROWS: u16 = 21;
   export const GRID_GAP: u16 = 22;
@@ -84,6 +87,10 @@ export namespace prop {
   export const TABS_LABELS: u16 = 20;
   export const TABS_SELECTED: u16 = 21;
   export const PROGRESS_VALUE: u16 = 20;
+  export const POPUP_OPEN: u16 = 20;
+  export const POPUP_ANCHOR: u16 = 21;
+  export const POPUP_PLACEMENT: u16 = 22;
+  export const MENU_ITEMS: u16 = 20;
 }
 
 export namespace ev {
@@ -106,6 +113,9 @@ export namespace ev {
   export const NEAR_END: u8 = 17;
   export const LINK: u8 = 18;
   export const DOUBLE_CLICK: u8 = 19;
+  export const NEAR_START: u8 = 20;
+  export const CONTEXT_MENU: u8 = 21;
+  export const DISMISS: u8 = 22;
 }
 
 export const STRETCH: i32 = 0;
@@ -459,6 +469,14 @@ export function progress(v: f32): B {
 export function divider(): B {
   return create(kind.DIVIDER);
 }
+/** A popup: leave it detached, give it one child, and show it with `open`. */
+export function popup(): B {
+  return create(kind.POPUP);
+}
+/** A menu, one item per line (see docs/components.md). Choosing one sends SELECT. */
+export function menu(items: string): B {
+  return create(kind.MENU).str(prop.MENU_ITEMS, items);
+}
 
 // ---- events ----
 
@@ -466,7 +484,8 @@ export function divider(): B {
  * One event. Which fields are set depends on `type` (see `ev`):
  *
  *   RESIZE        w, h, scale
- *   CLICK, DOUBLE_CLICK, FOCUS_OUT, NEAR_END   node
+ *   CLICK, DOUBLE_CLICK, FOCUS_OUT, NEAR_END, NEAR_START, DISMISS   node
+ *   CONTEXT_MENU  node, x, y
  *   CHANGE, SUBMIT   node, text
  *   TOGGLE        node, value (0/1)
  *   SELECT        node, value (index)
@@ -568,7 +587,14 @@ export function decode(ptr: usize, length: u32): Event {
     case ev.DOUBLE_CLICK:
     case ev.FOCUS_OUT:
     case ev.NEAR_END:
+    case ev.NEAR_START:
+    case ev.DISMISS:
       e.node = r.u32();
+      break;
+    case ev.CONTEXT_MENU:
+      e.node = r.u32();
+      e.x = r.f32();
+      e.y = r.f32();
       break;
     case ev.CHANGE:
     case ev.SUBMIT:

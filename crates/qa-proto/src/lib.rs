@@ -39,9 +39,11 @@ pub mod kind {
     pub const TABS: u8 = 14;
     pub const PROGRESS: u8 = 15;
     pub const DIVIDER: u8 = 16;
+    pub const POPUP: u8 = 17;
+    pub const MENU: u8 = 18;
 
     pub fn is_builtin(k: u8) -> bool {
-        matches!(k, 1..=5 | 10..=16)
+        matches!(k, 1..=5 | 10..=18)
     }
 }
 
@@ -66,6 +68,9 @@ pub mod prop {
     pub const TAG: u16 = 16;
     /// 1 dims the node and everything inside it and stops their input.
     pub const DISABLED: u16 = 17;
+    /// A `popup` node id. A right-click (or the Menu key) on this node or a
+    /// descendant opens it at the pointer and sends `ContextMenu`.
+    pub const CONTEXT_MENU: u16 = 18;
 
     pub mod grid {
         pub const COLS: u16 = 20;
@@ -132,6 +137,19 @@ pub mod prop {
     pub mod progress {
         pub const VALUE: u16 = 20;
     }
+    pub mod popup {
+        /// 1 shows the popup. The runtime sets it back to 0 when it closes one.
+        pub const OPEN: u16 = 20;
+        /// The node to place it next to; 0 places it at the pointer.
+        pub const ANCHOR: u16 = 21;
+        /// 0 below · 1 above · 2 right · 3 left (it flips to fit the window).
+        pub const PLACEMENT: u16 = 22;
+    }
+    pub mod menu {
+        /// One item per line: `-` is a separator, a leading `!` disables an
+        /// item, a leading `*` checks it, and text after a tab is a shortcut hint.
+        pub const ITEMS: u16 = 20;
+    }
 }
 
 pub mod ev {
@@ -154,6 +172,9 @@ pub mod ev {
     pub const NEAR_END: u8 = 17;
     pub const LINK: u8 = 18;
     pub const DOUBLE_CLICK: u8 = 19;
+    pub const NEAR_START: u8 = 20;
+    pub const CONTEXT_MENU: u8 = 21;
+    pub const DISMISS: u8 = 22;
 }
 
 /// Text span records (`prop::text::SPANS`): repeated

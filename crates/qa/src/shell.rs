@@ -232,7 +232,8 @@ impl Shell {
             PEvent::PointerMove { x, y } => ui.pointer_move(x / s, y / s),
             PEvent::PointerLeave => ui.pointer_leave(),
             PEvent::Button { button, pressed, x, y } => ui.pointer_button(button, pressed, x / s, y / s),
-            PEvent::Scroll { dx, dy } => ui.wheel(dx / s, dy / s),
+            PEvent::Scroll { dx, dy, wheel } => ui.wheel(dx / s, dy / s, wheel),
+            PEvent::ScrollEnd => ui.wheel_end(),
             PEvent::Key { sym, text, pressed: true, mods, .. } => {
                 ui.mods = mods;
                 ui.key(sym, &text, mods);
@@ -263,6 +264,7 @@ impl Shell {
     /// Lays out and redraws what changed. Returns false when no buffer was free.
     fn draw(&mut self, d: &mut dyn Driver) -> bool {
         self.ui.layout();
+        let scrolling = self.ui.step_scrolls(now_ms());
         let mut over_damage = Vec::new();
         let over_now = match d.overlay_ui() {
             Some(o) if o.root != 0 => {
@@ -330,7 +332,7 @@ impl Shell {
                 render(ol, &mut canvas, *r, &o.fonts, &mut self.ocache, &crate::gfx::NoPixmaps);
             }
         }
-        if !self.ui.animated.is_empty() {
+        if !self.ui.animated.is_empty() || scrolling {
             self.p.request_frame();
         }
         self.p.present(&rects);
@@ -422,5 +424,5 @@ impl Shell {
 }
 
 fn is_input(e: &PEvent) -> bool {
-    matches!(e, PEvent::PointerMove { .. } | PEvent::PointerLeave | PEvent::Button { .. } | PEvent::Scroll { .. } | PEvent::Key { .. })
+    matches!(e, PEvent::PointerMove { .. } | PEvent::PointerLeave | PEvent::Button { .. } | PEvent::Scroll { .. } | PEvent::ScrollEnd | PEvent::Key { .. })
 }

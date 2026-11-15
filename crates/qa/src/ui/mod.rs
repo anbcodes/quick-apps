@@ -4,6 +4,7 @@ pub mod edit;
 pub mod interact;
 pub mod layout;
 pub mod paint;
+pub mod popup;
 pub mod theme;
 
 use crate::gfx::{Color, RectF};
@@ -76,13 +77,35 @@ pub struct ScrollSt {
     pub content_w: f32,
     pub content_h: f32,
     pub near_end_sent: bool,
+    pub near_start_sent: bool,
     pub at_end: bool,
+    /// Nodes on screen and their offsets from the viewport top, kept in
+    /// place when content around them changes size (the first that still exists).
+    pub anchor: Vec<(u32, f32)>,
+    /// Smooth wheel scrolling still to apply, logical px.
+    pub pending: (f32, f32),
+    /// Kinetic scrolling after a touchpad flick, px per ms.
+    pub vel: (f32, f32),
+}
+
+/// An open popup.
+pub struct OpenPopup {
+    pub id: u32,
+    /// The pointer when it opened, for popups placed at the pointer.
+    pub at: (f32, f32),
+    /// Focus before it opened, restored when it closes.
+    pub prev_focus: u32,
+    /// Focus moves into it at the next layout (once its content is there):
+    /// Some(opened from the keyboard).
+    pub focus_in: Option<bool>,
 }
 
 pub enum State {
     None,
     Input(Box<edit::Edit>),
     Scroll(ScrollSt),
+    /// A menu's highlighted item (line index), or -1.
+    Menu(i32),
 }
 
 pub struct Node {
@@ -108,6 +131,7 @@ impl Node {
         let st = match kind {
             kind::INPUT => State::Input(Box::default()),
             kind::SCROLL => State::Scroll(ScrollSt::default()),
+            kind::MENU => State::Menu(-1),
             _ => State::None,
         };
         Node {
@@ -170,7 +194,7 @@ impl Node {
             return false;
         }
         match self.kind {
-            kind::BUTTON | kind::INPUT | kind::CHECKBOX | kind::SELECT | kind::TABS => true,
+            kind::BUTTON | kind::INPUT | kind::CHECKBOX | kind::SELECT | kind::TABS | kind::MENU => true,
             kind::GRID => self.i(prop::grid::CLICKABLE, 0) != 0,
             kind::CANVAS => self.i(prop::canvas::FOCUSABLE, 0) != 0,
             _ => false,
@@ -206,6 +230,12 @@ pub enum UiEvent {
     Link(u32, u32),
     /// The second of two quick clicks on a button, checkbox or clickable grid.
     DoubleClick(u32),
+    NearStart(u32),
+    /// A right-click (or the Menu key) on a node with a `context_menu`,
+    /// in window coordinates.
+    ContextMenu { node: u32, x: f32, y: f32 },
+    /// The runtime closed a popup (Esc, a click outside, a menu choice).
+    Dismiss(u32),
 }
 
 impl UiEvent {
@@ -215,6 +245,7 @@ impl UiEvent {
             UiEvent::Click(n) | UiEvent::Change(n, _) | UiEvent::Submit(n, _) | UiEvent::Toggle(n, _) | UiEvent::Select(n, _) => n,
             UiEvent::Key { node, .. } | UiEvent::Pointer { node, .. } => node,
             UiEvent::FocusOut(n) | UiEvent::NearEnd(n) | UiEvent::Link(n, _) | UiEvent::DoubleClick(n) => n,
+            UiEvent::NearStart(n) | UiEvent::Dismiss(n) | UiEvent::ContextMenu { node: n, .. } => n,
         }
     }
 }
@@ -270,6 +301,16 @@ pub struct Ui {
     /// (node, offset, x, y).
     pub(crate) text_press: Option<(u32, usize, f32, f32)>,
     scroll_to: Vec<u32>,
+    /// Scrolls arranged since their NearStart/NearEnd were last checked.
+    pub(crate) near_check: Vec<u32>,
+    /// Scrolls with smooth or kinetic scrolling in progress.
+    pub(crate) scrolling: Vec<u32>,
+    /// When `scrolling` last advanced, ms.
+    pub(crate) scroll_clock: u64,
+    /// Recent touchpad scrolling: (scroll id, time ms, velocity px/ms).
+    pub(crate) fling: Option<(u32, u64, (f32, f32))>,
+    /// Open popups, bottom to top.
+    pub popups: Vec<OpenPopup>,
     /// The select whose popup list is open.
     pub open_select: u32,
     pub popup_hl: i32,
@@ -294,7 +335,7 @@ pub struct Ui {
 fn is_paint_only(kind: u8, p: u16) -> bool {
     match p {
         prop::VARIANT | prop::TOOLTIP => kind != kind::TEXT,
-        prop::TAG | prop::DISABLED => true,
+        prop::TAG | prop::DISABLED | prop::CONTEXT_MENU => true,
         _ => match kind {
             kind::GRID => p == prop::grid::SELECTED || p == prop::grid::CLICKABLE,
             kind::TEXT => p == prop::text::SPANS,
@@ -340,6 +381,11 @@ impl Ui {
             text_sel: None,
             text_press: None,
             scroll_to: Vec::new(),
+            near_check: Vec::new(),
+            scrolling: Vec::new(),
+            scroll_clock: 0,
+            fling: None,
+            popups: Vec::new(),
             open_select: 0,
             popup_hl: -1,
             anim_ms: 0,
@@ -364,6 +410,10 @@ impl Ui {
         self.open_select = 0;
         self.paste_into = 0;
         self.scroll_to.clear();
+        self.near_check.clear();
+        self.scrolling.clear();
+        self.fling = None;
+        self.popups.clear();
         self.animated.clear();
         self.out.clear();
         self.layout_dirty = true;
@@ -524,6 +574,10 @@ impl Ui {
                 next = order[pos + 1..].iter().find(outside).or_else(|| order[..pos].iter().rev().find(outside)).map(|&f| (f, self.focus_visible));
             }
         }
+        let open: Vec<u32> = self.popups.iter().map(|p| p.id).filter(|&p| self.is_ancestor(id, p)).collect();
+        if let Some(&first) = open.first() {
+            self.close_popups_from(first, false);
+        }
         self.detach(id);
         self.blur_if_inside(id);
         let mut stack = vec![id];
@@ -549,8 +603,11 @@ impl Ui {
         if !self.nodes.contains_key(&child) {
             return Err("no such child".into());
         }
-        if pk != kind::GRID && pk != kind::SCROLL {
+        if pk != kind::GRID && pk != kind::SCROLL && pk != kind::POPUP {
             return Err("parent is not a container".into());
+        }
+        if self.nodes[&child].kind == kind::POPUP {
+            return Err("a popup is not placed in a container; leave it detached".into());
         }
         if self.is_ancestor(child, parent) {
             return Err("would create a cycle".into());
@@ -560,8 +617,8 @@ impl Ui {
         }
         self.detach(child);
         let pn = self.nodes.get_mut(&parent).unwrap();
-        if pk == kind::SCROLL && !pn.children.is_empty() {
-            return Err("a scroll has exactly one child".into());
+        if (pk == kind::SCROLL || pk == kind::POPUP) && !pn.children.is_empty() {
+            return Err("a scroll or popup has exactly one child".into());
         }
         match before {
             Some(b) => {
@@ -716,6 +773,20 @@ impl Ui {
         if k == kind::IMAGE && (p == prop::image::SRC || p == prop::image::DATA) && !self.image_dirty.contains(&id) {
             self.image_dirty.push(id);
         }
+        if k == kind::POPUP && p == prop::popup::OPEN {
+            let on = v.as_f32().unwrap_or(0.0) != 0.0;
+            if on && !self.is_open(id) {
+                self.open_popup(id, false);
+            } else if !on && self.is_open(id) {
+                self.close_popups_from(id, false);
+            }
+            return Ok(());
+        }
+        if k == kind::MENU && p == prop::menu::ITEMS {
+            if let Some(n) = self.nodes.get_mut(&id) {
+                n.st = State::Menu(-1);
+            }
+        }
         if p == prop::HIDDEN && v != Val::None && self.focus != 0 && self.is_ancestor(id, self.focus) {
             self.set_focus(0, false);
         }
@@ -847,7 +918,8 @@ impl Ui {
     /// Tree-order list of focusable, visible nodes.
     pub fn focus_order(&self) -> Vec<u32> {
         let mut out = Vec::new();
-        let mut stack = vec![self.root];
+        // An open popup keeps the keyboard inside it.
+        let mut stack = vec![self.top_popup().unwrap_or(self.root)];
         while let Some(id) = stack.pop() {
             let Some(n) = self.nodes.get(&id) else { continue };
             if n.hidden() || n.disabled() {

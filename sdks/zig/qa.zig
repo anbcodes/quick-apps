@@ -13,7 +13,7 @@ const std = @import("std");
 pub const allocator = std.heap.wasm_allocator;
 pub const Node = u32;
 
-pub const Kind = enum(u8) { grid = 1, text = 2, image = 3, canvas = 4, scroll = 5, button = 10, input = 11, checkbox = 12, select = 13, tabs = 14, progress = 15, divider = 16 };
+pub const Kind = enum(u8) { grid = 1, text = 2, image = 3, canvas = 4, scroll = 5, button = 10, input = 11, checkbox = 12, select = 13, tabs = 14, progress = 15, divider = 16, popup = 17, menu = 18 };
 
 /// Prop ids (docs/ui-tree.md and docs/components.md).
 pub const prop = struct {
@@ -34,6 +34,7 @@ pub const prop = struct {
     pub const tooltip = 15;
     pub const tag = 16;
     pub const disabled = 17;
+    pub const context_menu = 18;
     pub const grid = struct {
         pub const cols = 20;
         pub const rows = 21;
@@ -92,6 +93,14 @@ pub const prop = struct {
     };
     pub const progress = struct {
         pub const value = 20;
+    };
+    pub const popup = struct {
+        pub const open = 20;
+        pub const anchor = 21;
+        pub const placement = 22;
+    };
+    pub const menu = struct {
+        pub const items = 20;
     };
 };
 
@@ -432,6 +441,14 @@ pub fn progress(v: f32) B {
 pub fn divider() B {
     return create(.divider);
 }
+/// A popup: leave it detached, give it one child, and set `prop.popup.open`.
+pub fn popup() B {
+    return create(.popup);
+}
+/// A menu, one item per line (see docs/components.md). Choosing one sends `select`.
+pub fn menu(items: []const u8) B {
+    return create(.menu).str(prop.menu.items, items);
+}
 
 // ---- events (docs/events.md) ----
 
@@ -458,6 +475,9 @@ pub const Event = union(enum) {
     near_end: Node,
     link: struct { node: Node, span: u32 },
     double_click: Node,
+    near_start: Node,
+    context_menu: struct { node: Node, x: f32, y: f32 },
+    dismiss: Node,
     unknown,
 };
 
@@ -531,6 +551,9 @@ pub fn decode(buf: []const u8) Event {
         17 => .{ .near_end = r.int(u32) },
         18 => .{ .link = .{ .node = r.int(u32), .span = r.int(u32) } },
         19 => .{ .double_click = r.int(u32) },
+        20 => .{ .near_start = r.int(u32) },
+        21 => .{ .context_menu = .{ .node = r.int(u32), .x = r.float(), .y = r.float() } },
+        22 => .{ .dismiss = r.int(u32) },
         else => blk: {
             has_node = false;
             break :blk .unknown;

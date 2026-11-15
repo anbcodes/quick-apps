@@ -30,7 +30,10 @@ options:
   --grant <grant>     grant for this run only: internet, cpu, folder rw <path>, …
 
 steps (run in order; each waits for the app to settle):
-  click:<text>        click the button, link, tab or node showing <text>
+  click:<text>        click the button, link, tab, menu item or node showing <text>
+  rclick:<text>       right-click it (opens its context menu)
+  hover:<text>        move the pointer over it
+  wheel:<px>          scroll under the pointer (negative scrolls up)
   select:<text>       drag-select <text> inside a text node
   type:<text>         type into the focused input
   key:<name>          Enter, Tab, Escape, Backspace, Up, Down, Left, Right,
@@ -139,9 +142,13 @@ impl Run {
     }
 
     fn click_at(&mut self, x: f32, y: f32) {
+        self.press_at(crate::platform::BUTTON_LEFT, x, y);
+    }
+
+    fn press_at(&mut self, button: u32, x: f32, y: f32) {
         self.ui.pointer_move(x, y);
-        self.ui.pointer_button(crate::platform::BUTTON_LEFT, true, x, y);
-        self.ui.pointer_button(crate::platform::BUTTON_LEFT, false, x, y);
+        self.ui.pointer_button(button, true, x, y);
+        self.ui.pointer_button(button, false, x, y);
         let evs = self.ui.take_events();
         self.d.events(&mut self.ui, evs);
     }
@@ -163,6 +170,15 @@ impl Run {
                     kind::CHECKBOX => m(n.s(prop::checkbox::LABEL)),
                     kind::INPUT => m(n.s(prop::input::PLACEHOLDER)) || (!n.s(prop::input::VALUE).is_empty() && m(n.s(prop::input::VALUE))),
                     kind::SELECT => m(n.s(prop::select::PLACEHOLDER)),
+                    kind::MENU => {
+                        let s = n.s(prop::menu::ITEMS).to_string();
+                        let items = crate::ui::popup::parse_items(&s);
+                        if let Some(i) = items.iter().position(|it| !it.sep && m(it.label)) {
+                            let rects = self.ui.menu_rects(id);
+                            return rects.get(i).map(|(_, r, _)| (r.x + r.w / 2.0, r.y + r.h / 2.0));
+                        }
+                        false
+                    }
                     kind::TABS => {
                         let labels: Vec<String> = n.s(prop::tabs::LABELS).split('\n').map(String::from).collect();
                         if let Some(i) = labels.iter().position(|l| m(l)) {
@@ -261,6 +277,18 @@ impl Run {
                 let (x, y) = self.find(arg).ok_or(format!("dblclick: nothing shows {arg:?}"))?;
                 self.click_at(x, y);
                 self.click_at(x, y);
+            }
+            "rclick" => {
+                let (x, y) = self.find(arg).ok_or(format!("rclick: nothing shows {arg:?}"))?;
+                self.press_at(crate::platform::BUTTON_RIGHT, x, y);
+            }
+            "hover" => {
+                let (x, y) = self.find(arg).ok_or(format!("hover: nothing shows {arg:?}"))?;
+                self.ui.pointer_move(x, y);
+            }
+            "wheel" => {
+                let d: f32 = arg.parse().map_err(|_| format!("wheel: {arg:?} is not a number"))?;
+                self.ui.wheel(0.0, d, false);
             }
             "select" => self.select(arg)?,
             "type" => {
@@ -366,7 +394,9 @@ fn key(name: &str) -> Option<(u32, String, u8)> {
 
 fn tree_order(ui: &Ui) -> Vec<u32> {
     let mut out = Vec::new();
+    // Open popups first: they are on top.
     let mut stack = vec![ui.root];
+    stack.extend(ui.popups.iter().map(|p| p.id));
     while let Some(id) = stack.pop() {
         let Some(n) = ui.nodes.get(&id) else { continue };
         if n.hidden() {
@@ -392,6 +422,8 @@ fn kind_name(k: u8) -> &'static str {
         kind::TABS => "tabs",
         kind::PROGRESS => "progress",
         kind::DIVIDER => "divider",
+        kind::POPUP => "popup",
+        kind::MENU => "menu",
         _ => "?",
     }
 }
@@ -412,6 +444,7 @@ pub fn dump(ui: &Ui) -> String {
             kind::INPUT => n.s(prop::input::VALUE),
             kind::TABS => n.s(prop::tabs::LABELS),
             kind::IMAGE => n.s(prop::image::SRC),
+            kind::MENU => n.s(prop::menu::ITEMS),
             _ => "",
         };
         if !shown.is_empty() {
@@ -441,6 +474,10 @@ pub fn dump(ui: &Ui) -> String {
     }
     let mut out = String::new();
     walk(ui, ui.root, 0, &mut out);
+    for p in &ui.popups {
+        out.push_str("open ");
+        walk(ui, p.id, 0, &mut out);
+    }
     out
 }
 

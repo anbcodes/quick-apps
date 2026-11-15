@@ -11,8 +11,10 @@ reads the tree back, so it keeps whatever state it needs itself.
 - Every node has a **kind**, a set of **props** (unset props use their
   defaults), an optional **context** map ([theming.md](theming.md)), and
   ordered children.
-- Only containers (`grid`, `scroll`) may have children. A `scroll` has exactly
-  one child.
+- Only containers (`grid`, `scroll`, `popup`) may have children. A `scroll`
+  or `popup` has exactly one child.
+- A `popup` is never a child: it stays detached and shows over the tree
+  while open.
 - Exactly one node is the **root**. It fills the window.
 
 Kinds:
@@ -26,6 +28,8 @@ Kinds:
 | 5 | scroll | 14 | tabs |
 | | | 15 | progress |
 | | | 16 | divider |
+| | | 17 | popup |
+| | | 18 | menu |
 
 Each kind is described in [components.md](components.md). Kind ids 128 and up
 are reserved for app-supplied components ([roadmap.md](roadmap.md)).
@@ -81,6 +85,7 @@ Any node accepts these. The prop id is the `u16` in `SET`.
 | 15 | `tooltip` | str | "" | Shown on hover after 600 ms |
 | 16 | `tag` | i32 | 0 | Sent back with every event that comes from the node ([events.md](events.md)) |
 | 17 | `disabled` | i32 | 0 | 1 dims the node and everything inside it, and they get no focus and send no events |
+| 18 | `context_menu` | i32 (node id) | 0 | A `popup` that a right-click on this node or inside it (or the Menu key while it has focus) opens at the pointer, after a `ContextMenu` event. The nearest one up the tree wins. |
 
 Kind-specific props start at id 20 and are listed in
 [components.md](components.md).
