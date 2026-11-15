@@ -248,6 +248,34 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// Blends premultiplied pixels unscaled at (x, y), faded by `alpha` (0..=255).
+    pub fn pixels(&mut self, x: i32, y: i32, w: i32, h: i32, data: &[u32], alpha: u32) {
+        if alpha == 0 {
+            return;
+        }
+        let b = Rect::new(x, y, w, h).intersect(&self.clip.b);
+        for py in b.y..b.bottom() {
+            let src = &data[((py - y) * w) as usize..];
+            let plain = self.clip_row_is_plain(py);
+            let row = py as usize * self.stride;
+            for px in b.x..b.right() {
+                let mut s = src[(px - x) as usize];
+                if s == 0 {
+                    continue;
+                }
+                let mut a = alpha;
+                if !plain {
+                    a = (a as f32 * self.clip_cov(px, py)) as u32;
+                }
+                if a < 255 {
+                    s = mul(s, a);
+                }
+                let i = row + px as usize;
+                self.px[i] = over(self.px[i], s);
+            }
+        }
+    }
+
     /// Copies premultiplied pixels, scaled with bilinear filtering from `src_rect` into `dst`.
     pub fn image(&mut self, src: &[u32], sw: i32, sh: i32, src_rect: RectF, dst: RectF, smooth: bool) {
         if dst.w <= 0.0 || dst.h <= 0.0 || sw <= 0 || sh <= 0 {

@@ -9,7 +9,7 @@ edition = "2021"
 
 [workspace.dependencies]
 libc = "0.2"
-ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
+ttf-parser = { version = "0.25", default-features = false, features = ["std", "opentype-layout"] }
 wasmi = { version = "2", default-features = false, features = ["std", "validate"] }
 mhttp = { path = "../mtui/crates/mhttp" }
 miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }

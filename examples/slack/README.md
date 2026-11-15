@@ -63,7 +63,8 @@ An `api <url>` line in `data/config` does the same from inside the app.
 ## Limitations
 
 - No file upload or download; files are shown by name.
-- No color emoji font in the runtime, so most `:shortcodes:` stay as text.
-  A few that DejaVu Sans can draw (♥ ★ ✔ ⚠ …) are swapped in.
+- Standard `:shortcodes:` become emoji (Slack's own list, from
+  iamcal/emoji-data), which need a color emoji font such as Noto Color Emoji.
+  Custom workspace emoji stay as `:name:`.
 - No search, editing, deleting, or unread tracking for conversations other
   than through `client.counts` and live events.

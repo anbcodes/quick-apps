@@ -13,6 +13,8 @@ pub struct Font {
     pub path: PathBuf,
     /// Draw thicker outlines because no real bold face was found.
     pub synth_bold: bool,
+    /// Glyphs are color bitmaps (CBDT or sbix), such as Noto Color Emoji.
+    pub color: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -53,6 +55,8 @@ pub const DEFAULT_FALLBACK: &[&str] = &[
     "DejaVuSansMono.ttf",
     "NotoEmoji-Regular.ttf",
     "Symbola.ttf",
+    "NotoColorEmoji.ttf",
+    "Apple Color Emoji.ttc",
     "NotoSansCJK-Regular.otf",
     "DroidSansFallbackFull.ttf",
     "unifont.otf",
@@ -111,7 +115,7 @@ fn walk(dir: &Path, depth: u32, out: &mut HashMap<String, PathBuf>) {
             }
         } else if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
             let lower = name.to_ascii_lowercase();
-            if lower.ends_with(".ttf") || lower.ends_with(".otf") {
+            if lower.ends_with(".ttf") || lower.ends_with(".otf") || lower.ends_with(".ttc") {
                 // Earlier directories win, so user fonts shadow system ones.
                 out.entry(name.to_string()).or_insert(p);
             }
@@ -131,8 +135,10 @@ impl Fonts {
         let data = mmap_file(path)?;
         let face = Face::parse(data, 0).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{}: {e}", path.display())))?;
         let upem = face.units_per_em() as f32;
+        let t = face.tables();
+        let color = t.cbdt.is_some() || t.sbix.is_some();
         let id = self.fonts.len() as FontId;
-        self.fonts.push(Font { face, upem, path: path.to_path_buf(), synth_bold: false });
+        self.fonts.push(Font { face, upem, path: path.to_path_buf(), synth_bold: false, color });
         self.by_path.insert(path.to_path_buf(), id);
         Ok(id)
     }
@@ -143,7 +149,7 @@ impl Fonts {
             return i as FontId;
         }
         let r = &self.fonts[regular as usize];
-        let f = Font { face: r.face.clone(), upem: r.upem, path: r.path.clone(), synth_bold: true };
+        let f = Font { face: r.face.clone(), upem: r.upem, path: r.path.clone(), synth_bold: true, color: r.color };
         self.fonts.push(f);
         (self.fonts.len() - 1) as FontId
     }
@@ -206,13 +212,14 @@ impl Fonts {
     }
 
     /// Sets the fallback list from font names, skipping missing fonts and
-    /// those with only color bitmaps (which can't be drawn yet).
+    /// those with neither outlines nor color bitmaps.
     pub fn set_fallback(&mut self, names: &[&str]) {
         let mut v = Vec::new();
         for n in names {
             let Some(id) = self.find(n) else { continue };
-            let t = self.fonts[id as usize].face.tables();
-            if (t.glyf.is_some() || t.cff.is_some()) && !v.contains(&id) {
+            let f = &self.fonts[id as usize];
+            let t = f.face.tables();
+            if (t.glyf.is_some() || t.cff.is_some() || f.color) && !v.contains(&id) {
                 v.push(id);
             }
         }
@@ -245,7 +252,18 @@ impl Fonts {
         0.0
     }
 
-    fn glyph_for(&self, f: FontId, ch: char) -> (FontId, u16) {
+    /// The glyph for `ch`, from a color font first when `color` is set
+    /// (emoji presentation), else from `f` and then the fallbacks in order.
+    fn glyph_in(&self, f: FontId, ch: char, color: bool) -> (FontId, u16) {
+        if color {
+            for &fb in &self.fallback {
+                if self.fonts[fb as usize].color {
+                    if let Some(g) = self.fonts[fb as usize].face.glyph_index(ch) {
+                        return (fb, g.0);
+                    }
+                }
+            }
+        }
         if let Some(g) = self.fonts[f as usize].face.glyph_index(ch) {
             return (f, g.0);
         }
@@ -257,55 +275,149 @@ impl Fonts {
         (f, 0)
     }
 
-    /// Positions `text` on one line. Returns the advance width.
+    fn glyph_for(&self, f: FontId, ch: char) -> (FontId, u16) {
+        self.glyph_in(f, ch, emoji_presentation(ch))
+    }
+
+    fn adv(&self, font: FontId, id: u16, size: f32) -> f32 {
+        let fo = &self.fonts[font as usize];
+        fo.face.glyph_hor_advance(GlyphId(id)).unwrap_or(0) as f32 * size / fo.upem
+    }
+
+    /// What `ch` does to the glyph before it: `Some(Some(color))` switches
+    /// that glyph to emoji (FE0F) or text (FE0E) presentation, `Some(None)`
+    /// means `ch` takes no space at all, `None` means it is drawn normally.
+    fn modifier(prev: Option<char>, ch: char) -> Option<Option<bool>> {
+        let p = prev?;
+        match ch {
+            '\u{FE0F}' => Some(Some(true)),
+            '\u{FE0E}' => Some(Some(false)),
+            // Joiners, other variation selectors, skin tones and tag
+            // characters only make sense to a ligature-aware emoji font. We
+            // draw the base emoji and drop the rest.
+            '\u{200D}' | '\u{FE00}'..='\u{FE0D}' | '\u{E0020}'..='\u{E007F}' => Some(None),
+            '\u{1F3FB}'..='\u{1F3FF}' if emoji_presentation(p) || p == '\u{FE0F}' => Some(None),
+            _ => None,
+        }
+    }
+
+    /// Positions `text` on one line, one glyph per char (chars that a
+    /// selector, joiner or ligature swallowed get `id == NO_GLYPH`).
+    /// Returns the advance width.
     pub fn shape(&self, f: FontId, size: f32, text: &str, out: &mut Vec<PGlyph>) -> f32 {
+        let chars: Vec<char> = text.chars().filter(|&c| c != '\n' && c != '\r').map(|c| if c == '\t' { ' ' } else { c }).collect();
         let mut x = 0.0;
         let mut prev: Option<(FontId, u16)> = None;
-        for ch in text.chars() {
-            if ch == '\n' || ch == '\r' {
+        let mut i = 0;
+        while i < chars.len() {
+            let ch = chars[i];
+            if Self::modifier(i.checked_sub(1).map(|j| chars[j]), ch).is_some() {
+                out.push(PGlyph { font: f, id: NO_GLYPH, x });
+                i += 1;
                 continue;
             }
-            let ch = if ch == '\t' { ' ' } else { ch };
-            let (font, id) = self.glyph_for(f, ch);
-            let fo = &self.fonts[font as usize];
-            let s = size / fo.upem;
+            let next = chars.get(i + 1).copied();
+            let color = match next {
+                Some('\u{FE0F}') => true,
+                Some('\u{FE0E}') => false,
+                Some(n) => emoji_presentation(ch) || (is_flag_letter(ch) && is_flag_letter(n)),
+                None => emoji_presentation(ch),
+            };
+            let (font, mut id) = self.glyph_in(f, ch, color);
+            let mut used = 1;
+            if self.fonts[font as usize].color && next.is_some() {
+                (id, used) = self.ligature(font, id, &chars[i..]);
+            }
+            let s = size / self.fonts[font as usize].upem;
             if let Some((pf, pid)) = prev {
                 if pf == font {
                     x += self.kern(font, pid, id) * s;
                 }
             }
             out.push(PGlyph { font, id, x });
-            x += fo.face.glyph_hor_advance(GlyphId(id)).unwrap_or(0) as f32 * s;
+            x += self.adv(font, id, size);
+            for _ in 1..used {
+                out.push(PGlyph { font: f, id: NO_GLYPH, x });
+            }
             prev = Some((font, id));
+            i += used;
         }
         x
+    }
+
+    /// Applies a color font's ligatures (emoji ZWJ sequences, flags, skin
+    /// tones, keycaps) to the glyph `first` for `chars[0]`. Returns the glyph
+    /// and how many chars it covers.
+    fn ligature(&self, font: FontId, first: u16, chars: &[char]) -> (u16, usize) {
+        use ttf_parser::gsub::SubstitutionSubtable;
+        let face = &self.fonts[font as usize].face;
+        let Some(gsub) = face.tables().gsub else { return (first, 1) };
+        // (glyph, chars it stands for), for the run the font covers.
+        let mut seq: Vec<(u16, usize)> = vec![(first, 1)];
+        for &c in chars.iter().skip(1).take(15) {
+            match face.glyph_index(c) {
+                Some(g) => seq.push((g.0, 1)),
+                None => break,
+            }
+        }
+        if seq.len() < 2 {
+            return (first, 1);
+        }
+        for li in 0..gsub.lookups.len() {
+            let Some(lookup) = gsub.lookups.get(li) else { continue };
+            for si in 0..lookup.subtables.len() {
+                let Some(SubstitutionSubtable::Ligature(lig)) = lookup.subtables.get::<SubstitutionSubtable>(si) else { continue };
+                let mut k = 0;
+                while k < seq.len() {
+                    let hit = lig.coverage.get(GlyphId(seq[k].0)).and_then(|ci| lig.ligature_sets.get(ci)).and_then(|set| {
+                        set.into_iter().find(|l| {
+                            let n = l.components.len() as usize;
+                            k + n < seq.len() && l.components.into_iter().enumerate().all(|(j, g)| seq[k + 1 + j].0 == g.0)
+                        })
+                    });
+                    if let Some(l) = hit {
+                        let n = l.components.len() as usize;
+                        let covered = seq[k..=k + n].iter().map(|e| e.1).sum();
+                        seq.splice(k..=k + n, [(l.glyph.0, covered)]);
+                    }
+                    k += 1;
+                }
+            }
+        }
+        seq[0]
     }
 
     pub fn measure(&self, f: FontId, size: f32, text: &str) -> f32 {
-        let mut x = 0.0;
-        let mut prev = None;
-        for ch in text.chars() {
-            if ch == '\n' || ch == '\r' {
-                continue;
-            }
-            x += self.advance(f, size, prev, ch);
-            prev = Some(ch);
-        }
-        x
+        let mut g = Vec::new();
+        self.shape(f, size, text, &mut g)
     }
 
     /// The width `ch` adds after `prev` on the same line, kerning included.
-    /// Summed over a line it gives the same width as `measure`.
+    /// Summed over a line it gives the same width as `measure`, except
+    /// around presentation selectors after a kerned pair, which is rare
+    /// enough to ignore.
     pub fn advance(&self, f: FontId, size: f32, prev: Option<char>, ch: char) -> f32 {
         let tab = |c: char| if c == '\t' { ' ' } else { c };
-        let (font, id) = self.glyph_for(f, tab(ch));
-        let fo = &self.fonts[font as usize];
-        let s = size / fo.upem;
-        let mut x = fo.face.glyph_hor_advance(GlyphId(id)).unwrap_or(0) as f32 * s;
+        let (ch, prev) = (tab(ch), prev.map(tab));
+        if let Some(m) = Self::modifier(prev, ch) {
+            // A selector swaps the previous glyph; the difference lands here.
+            let (Some(color), Some(p)) = (m, prev) else { return 0.0 };
+            let (of, oid) = self.glyph_for(f, p);
+            let (nf, nid) = self.glyph_in(f, p, color);
+            if (nf, nid) == (of, oid) || nid == 0 {
+                return 0.0;
+            }
+            return self.adv(nf, nid, size) - self.adv(of, oid, size);
+        }
+        let (font, id) = self.glyph_for(f, ch);
+        let s = size / self.fonts[font as usize].upem;
+        let mut x = self.adv(font, id, size);
         if let Some(p) = prev {
-            let (pf, pid) = self.glyph_for(f, tab(p));
-            if pf == font {
-                x += self.kern(font, pid, id) * s;
+            if !matches!(p, '\u{FE00}'..='\u{FE0F}' | '\u{200D}') {
+                let (pf, pid) = self.glyph_for(f, p);
+                if pf == font {
+                    x += self.kern(font, pid, id) * s;
+                }
             }
         }
         x
@@ -319,6 +431,35 @@ impl Fonts {
         stops.push(w);
         stops
     }
+}
+
+/// Marks a char that takes no space (see `Fonts::shape`).
+pub const NO_GLYPH: u16 = u16::MAX;
+
+/// Whether `c` defaults to emoji (color) presentation. Approximates the
+/// Unicode Emoji_Presentation property: everything from the Mahjong tiles up
+/// that a color font has, plus the older symbols listed here.
+pub fn emoji_presentation(c: char) -> bool {
+    let c = c as u32;
+    if (0x1F000..0x1FB00).contains(&c) {
+        // Regional indicators and other letter-like symbols stay text.
+        return !(0x1F100..0x1F18E).contains(&c) && !(0x1F1E6..=0x1F1FF).contains(&c);
+    }
+    const BMP: &[(u32, u32)] = &[
+        (0x231A, 0x231B), (0x23E9, 0x23EC), (0x23F0, 0x23F0), (0x23F3, 0x23F3), (0x25FD, 0x25FE),
+        (0x2614, 0x2615), (0x2648, 0x2653), (0x267F, 0x267F), (0x2693, 0x2693), (0x26A1, 0x26A1),
+        (0x26AA, 0x26AB), (0x26BD, 0x26BE), (0x26C4, 0x26C5), (0x26CE, 0x26CE), (0x26D4, 0x26D4),
+        (0x26EA, 0x26EA), (0x26F2, 0x26F3), (0x26F5, 0x26F5), (0x26FA, 0x26FA), (0x26FD, 0x26FD),
+        (0x2705, 0x2705), (0x270A, 0x270B), (0x2728, 0x2728), (0x274C, 0x274C), (0x274E, 0x274E),
+        (0x2753, 0x2755), (0x2757, 0x2757), (0x2795, 0x2797), (0x27B0, 0x27B0), (0x27BF, 0x27BF),
+        (0x2B1B, 0x2B1C), (0x2B50, 0x2B50), (0x2B55, 0x2B55),
+    ];
+    BMP.iter().any(|&(a, b)| (a..=b).contains(&c))
+}
+
+/// A regional indicator letter; two make a flag.
+fn is_flag_letter(c: char) -> bool {
+    ('\u{1F1E6}'..='\u{1F1FF}').contains(&c)
 }
 
 fn is_cjk(c: char) -> bool {
@@ -354,7 +495,10 @@ pub fn wrap(fonts: &Fonts, f: FontId, size: f32, text: &str, max_w: f32) -> Vec<
                 }
                 let cw = fonts.advance(f, size, prev_ch, ch);
                 // The tolerance absorbs float drift against `measure`'s sum.
-                if w + cw > max_w + 0.01 && ch != ' ' && i > 0 {
+                if w + cw > max_w + 0.01 && ch != ' ' && i > 0 && Fonts::modifier(prev_ch, ch).is_none()
+                    && prev_ch != Some('\u{200D}')
+                    && !(prev_ch.is_some_and(is_flag_letter) && is_flag_letter(ch))
+                {
                     match last_break {
                         Some(b) if b > 0 => {
                             end = b;

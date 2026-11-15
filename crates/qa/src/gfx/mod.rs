@@ -192,11 +192,20 @@ pub fn render(list: &[Cmd], canvas: &mut Canvas, damage: Rect, fonts: &Fonts, ca
             Cmd::Glyphs { size, color, x, y, glyphs } => {
                 let by = y.round() as i32;
                 for g in glyphs {
+                    if g.id == crate::text::NO_GLYPH {
+                        continue;
+                    }
                     let gx = x + g.x;
                     let ix = gx.floor();
-                    let sub = (((gx - ix) * SUBPIXELS) as u8).min(SUBPIXELS as u8 - 1);
+                    let color_font = fonts.fonts[g.font as usize].color;
+                    // Bitmaps don't get subpixel positions; the cache would
+                    // just hold four copies.
+                    let sub = if color_font { 0 } else { (((gx - ix) * SUBPIXELS) as u8).min(SUBPIXELS as u8 - 1) };
                     let bm = cache.get(fonts, g.font, g.id, *size, sub);
-                    if bm.w > 0 {
+                    if bm.w > 0 && !bm.rgba.is_empty() {
+                        let ix = gx.round() as i32;
+                        canvas.pixels(ix + bm.left, by + bm.top, bm.w, bm.h, &bm.rgba, color.premul() >> 24);
+                    } else if bm.w > 0 {
                         canvas.mask(ix as i32 + bm.left, by + bm.top, bm.w, bm.h, &bm.data, *color);
                     }
                 }

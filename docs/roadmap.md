@@ -22,9 +22,9 @@ about 15 MB RSS for the counter window, 0 CPU ticks while idle.
 These are described elsewhere in the docs but the code does less:
 
 - **Text:** `tooltip` (prop 15) is stored but does nothing. A text selection
-  stays inside one text node. GPOS kerning is not read (only the `kern` table). Fonts
-  with only color bitmaps (most emoji fonts) are skipped as fallbacks, so
-  color emoji don't draw.
+  stays inside one text node. GPOS kerning is not read (only the `kern` table).
+  Color emoji draw only from bitmap fonts (CBDT, sbix); COLR fonts such as
+  Twemoji or Segoe UI Emoji are not drawn in color.
 - **Memory budget:** only wasm linear memory is counted. Host-side buffers
   (nodes, decoded images, pending network bodies) are not, and never return
   `LIMIT`.
@@ -42,7 +42,7 @@ These are described elsewhere in the docs but the code does less:
 - **Other platforms and backends:** X11, macOS, Windows, Android, iOS, a GPU
   renderer, a terminal backend ([rendering.md](rendering.md) explains how each
   would be added).
-- **Text:** IME, complex scripts and RTL, color emoji, rich-text spans.
+- **Text:** IME, complex scripts and RTL, rich-text spans.
 - **UI:** accessibility (AT-SPI), an animation API, virtualized lists, more
   than one window per app, drag and drop, notifications, printing.
 - **Wasm:** WASI, threads, SIMD, app-supplied components.

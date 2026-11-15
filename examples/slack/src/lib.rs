@@ -4,6 +4,7 @@
 #![no_std]
 extern crate alloc;
 
+mod emoji;
 mod fmt;
 
 use alloc::collections::{BTreeMap, BTreeSet};
@@ -173,8 +174,7 @@ enum MenuAct {
 }
 
 /// Reactions offered by the picker.
-/// Only ones the runtime's fonts can draw (see `fmt::reaction`).
-const PICKS: [&str; 12] = ["heart", "white_check_mark", "x", "star", "smile", "frowning", "point_up", "warning", "zap", "coffee", "sunny", "question"];
+const PICKS: [&str; 12] = ["+1", "heart", "joy", "tada", "eyes", "pray", "white_check_mark", "fire", "100", "raised_hands", "thinking_face", "rocket"];
 
 /// Names for rendering, and the reverse maps for outgoing mentions.
 #[derive(Default)]

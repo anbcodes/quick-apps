@@ -117,16 +117,15 @@ pub fn encode(text: &str, handles: &Names, chans: &Names) -> String {
     out
 }
 
-/// Shortcodes whose symbols the usual fonts have (color emoji can't be drawn
-/// yet). Others stay as `:name:`.
-const EMOJI: &[(&str, &str)] = &[
-    ("heart", "♥"), ("star", "★"), ("white_check_mark", "✔"), ("heavy_check_mark", "✔"), ("x", "✘"),
-    ("warning", "⚠"), ("zap", "⚡"), ("coffee", "☕"), ("smile", "☺"), ("slightly_smiling_face", "☺"),
-    ("frowning", "☹"), ("point_up", "☝"), ("point_right", "☞"), ("point_left", "☜"), ("arrow_up", "↑"),
-    ("arrow_down", "↓"), ("arrow_right", "→"), ("arrow_left", "←"), ("sparkles", "✨"), ("snowflake", "❄"),
-    ("sunny", "☀"), ("cloud", "☁"), ("umbrella", "☂"), ("hourglass", "⌛"), ("email", "✉"), ("scissors", "✂"),
-    ("pencil2", "✏"), ("question", "?"), ("exclamation", "!"),
-];
+/// The emoji for a Slack shortcode (without colons), if it is one.
+pub fn lookup(name: &str) -> Option<&'static str> {
+    const TONES: [&str; 5] = ["\u{1f3fb}", "\u{1f3fc}", "\u{1f3fd}", "\u{1f3fe}", "\u{1f3ff}"];
+    if let Some(n) = name.strip_prefix("skin-tone-") {
+        return n.parse::<usize>().ok().filter(|n| (2..=6).contains(n)).map(|n| TONES[n - 2]);
+    }
+    let t = crate::emoji::EMOJI;
+    t.binary_search_by(|(n, _)| (*n).cmp(name)).ok().map(|i| t[i].1)
+}
 
 pub fn emoji(s: &str) -> String {
     if !s.contains(':') {
@@ -138,7 +137,7 @@ pub fn emoji(s: &str) -> String {
         out.push_str(&rest[..i]);
         let after = &rest[i + 1..];
         let end = after.find(|c: char| !(c.is_ascii_alphanumeric() || "_+-".contains(c)));
-        let hit = end.filter(|&e| e > 0 && after.as_bytes()[e] == b':').and_then(|e| EMOJI.iter().find(|(n, _)| *n == &after[..e]).map(|(_, ch)| (e, *ch)));
+        let hit = end.filter(|&e| e > 0 && after.as_bytes()[e] == b':').and_then(|e| lookup(&after[..e]).map(|ch| (e, ch)));
         match hit {
             Some((e, ch)) => {
                 out.push_str(ch);
@@ -154,11 +153,19 @@ pub fn emoji(s: &str) -> String {
     out
 }
 
-/// A reaction chip label: the symbol if we have one, else `:name:`.
+/// A reaction chip label: the emoji (with its skin tone) if it is a
+/// standard one, else `:name:`.
 pub fn reaction(name: &str) -> String {
-    let base = name.split("::").next().unwrap_or(name);
-    match EMOJI.iter().find(|(n, _)| *n == base) {
-        Some((_, ch)) => String::from(*ch),
+    let mut parts = name.split("::");
+    let base = parts.next().unwrap_or(name);
+    match lookup(base) {
+        Some(ch) => {
+            let mut s = String::from(ch);
+            for p in parts {
+                s.push_str(lookup(p).unwrap_or(""));
+            }
+            s
+        }
         None => cat(&[":", base, ":"]),
     }
 }

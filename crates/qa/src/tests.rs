@@ -657,6 +657,44 @@ fn missing_fallback_fonts_are_skipped() {
 }
 
 #[test]
+fn color_emoji_shape_as_one_glyph() {
+    let mut f = Fonts::new();
+    let Some(sans) = f.find_first(text::DEFAULT_SANS) else { return };
+    f.set_fallback(text::DEFAULT_FALLBACK);
+    let Some(&emoji) = f.fallback.iter().find(|&&id| f.fonts[id as usize].color) else {
+        eprintln!("no color emoji font; skipping");
+        return;
+    };
+    let shape = |f: &Fonts, s: &str| {
+        let mut g = Vec::new();
+        f.shape(sans, 16.0, s, &mut g);
+        g
+    };
+    // One glyph per char; the extras in a sequence are invisible.
+    let visible = |g: &[text::PGlyph]| g.iter().filter(|g| g.id != text::NO_GLYPH).map(|g| g.font).collect::<Vec<_>>();
+    assert_eq!(visible(&shape(&f, "a\u{1F600}")), vec![sans, emoji]);
+    // A ZWJ family, a toned thumb and a flag each draw as one emoji glyph.
+    for s in ["\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}", "\u{1F44D}\u{1F3FD}", "\u{1F1FA}\u{1F1F8}"] {
+        let g = shape(&f, s);
+        assert_eq!(g.len(), s.chars().count());
+        assert_eq!(visible(&g), vec![emoji], "{s:?}");
+    }
+    // ❤ is text by default, emoji with FE0F, and the widths agree with
+    // what wrapping adds up.
+    let heart = shape(&f, "\u{2764}");
+    assert_ne!(f.fonts[heart[0].font as usize].color, true);
+    let red = shape(&f, "\u{2764}\u{FE0F}");
+    assert_eq!(visible(&red), vec![emoji]);
+    let w = f.measure(sans, 16.0, "x\u{2764}\u{FE0F}y");
+    let sum: f32 = ['x', '\u{2764}', '\u{FE0F}', 'y'].windows(2).fold(f.advance(sans, 16.0, None, 'x'), |a, p| a + f.advance(sans, 16.0, Some(p[0]), p[1]));
+    assert!((w - sum).abs() < 0.01, "{w} vs {sum}");
+    // The glyph renders as color pixels.
+    let mut cache = crate::gfx::glyph::GlyphCache::new();
+    let bm = cache.get(&f, emoji, red[0].id, 16.0, 0);
+    assert!(bm.w >= 14 && bm.w <= 24 && !bm.rgba.is_empty(), "{}x{}", bm.w, bm.h);
+}
+
+#[test]
 fn run_opts_parse() {
     let mut a: Vec<String> = ["app", "--map", "https://x/=http://y/", "--grant", "internet", "click:Go"].iter().map(|s| s.to_string()).collect();
     let o = crate::shot::RunOpts::take(&mut a).unwrap();

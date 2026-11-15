@@ -44,13 +44,23 @@ draw these six commands can render Quick Apps.
 ## Text
 
 - Shaping is simple: `cmap` → glyph, `hmtx` advances, and `kern`-table pair
-  kerning (GPOS kerning is not read yet). There are no ligatures, no bidi and
-  no complex scripts in v1.
+  kerning (GPOS kerning is not read yet). There are no text ligatures, no
+  bidi and no complex scripts in v1.
+- Color emoji come from color bitmap fonts (CBDT, as in Noto Color Emoji, or
+  sbix, as in Apple Color Emoji). Characters that default to emoji
+  presentation, and any character followed by U+FE0F, use the first color
+  font in the fallback list that has them; U+FE0E asks for the text glyph.
+  The color font's GSUB ligatures are applied, so ZWJ sequences, skin tones,
+  flags and keycaps draw as one glyph. The bitmap is scaled to the text size
+  and faded by the text color's alpha, but not tinted. Wrapping measures a
+  ligature as its parts, so a line holding one may break a little early.
 - A glyph missing from the style's font comes from the first fallback font
   that has it. `font.fallback` lists them, comma-separated (file names or
   paths); the default list tries DejaVu Sans, Noto Sans, the Noto symbol and
-  math fonts, Noto Emoji (monochrome), Symbola, Noto CJK, Droid Sans Fallback
-  and Unifont. Missing fonts and fonts with only color bitmaps are skipped.
+  math fonts, Noto Emoji (monochrome), Symbola, Noto Color Emoji, Apple Color
+  Emoji, Noto CJK, Droid Sans Fallback and Unifont. Missing fonts are skipped.
+  On Debian and Ubuntu, `apt install fonts-noto-color-emoji` provides color
+  emoji.
 - Text spans ([components.md](components.md)) split a line into runs of
   glyphs, one per style. Bold is synthetic (thicker outlines), so it never
   changes widths or line breaks; underlines and code backgrounds are fills
