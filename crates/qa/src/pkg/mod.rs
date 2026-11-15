@@ -21,6 +21,15 @@ pub fn app_id(source: &str) -> String {
     sha256::hex(&sha256::digest(source.as_bytes()))[..16].to_string()
 }
 
+/// The window's app id (and WM_CLASS on X11): `qa.` and the name in lowercase
+/// with dashes, like `qa.slack-lite`. Bars and switchers that show the app id
+/// as it is, or its last dotted part, then show something a person can read.
+pub fn window_class(name: &str) -> String {
+    let slug: String = name.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { '-' }).collect();
+    let slug = slug.split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-");
+    format!("qa.{}", if slug.is_empty() { "app" } else { &slug })
+}
+
 /// Who an app is and where its things live.
 #[derive(Clone, Debug)]
 pub struct AppCtx {

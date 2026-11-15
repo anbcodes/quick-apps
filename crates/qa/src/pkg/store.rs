@@ -391,6 +391,12 @@ pub fn write_running_entry(ctx: &AppCtx) {
     #[cfg(target_os = "linux")]
     if !has_menu_entry(ctx) {
         let _ = write_entry(ctx, &ctx.name, "", true);
+    } else if let Some(m) = cached_manifest(ctx) {
+        // Entries written before windows had readable app ids name the old one.
+        let class = format!("\nStartupWMClass={}\n", super::window_class(&m.name));
+        if !std::fs::read_to_string(desktop_path(ctx)).is_ok_and(|s| s.contains(&class)) {
+            let _ = write_desktop(ctx, &m);
+        }
     }
     #[cfg(not(target_os = "linux"))]
     let _ = ctx;
@@ -407,12 +413,12 @@ fn write_entry(ctx: &AppCtx, name: &str, comment: &str, hidden: bool) -> Result<
         _ => &ctx.source,
     };
     let mut s = format!(
-        "[Desktop Entry]\nType=Application\nName={}\nComment={}\nExec={} run {}\nStartupWMClass=qa-{}\n",
+        "[Desktop Entry]\nType=Application\nName={}\nComment={}\nExec={} run {}\nStartupWMClass={}\n",
         clean(name),
         clean(comment),
         exe,
         target.replace(' ', "%20"),
-        ctx.id
+        super::window_class(name)
     );
     if icon.exists() {
         s += &format!("Icon={}\n", icon.display());

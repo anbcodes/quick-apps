@@ -26,7 +26,7 @@ pub fn open(arg: &str) -> i32 {
     }
     let _ = store::register_handler();
     let mut d = Prompt::new(&url);
-    let code = crate::run_native_sized(&mut d, "Install app", "qa-open", (460, 250), None);
+    let code = crate::run_native_sized(&mut d, "Install app", "qa-open", Some("open"), (460, 250), None);
     match d.outcome {
         Outcome::Run => crate::cli::run(&url),
         Outcome::Close => code,

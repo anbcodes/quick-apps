@@ -173,12 +173,14 @@ Name=Notes
 Comment=Plain text notes
 Icon=/home/andrew/.local/share/quick-apps/apps/<app-id>/bundle/icon.png
 Exec=qa run https://apps.example.com/notes/app.json
-StartupWMClass=qa-<app-id>
+StartupWMClass=qa.notes
 ```
 
-The window's `xdg_toplevel` app_id (and `WM_CLASS` on X11) is `qa-<app-id>`,
-so docks group and pin each app correctly, and task bars and window switchers
-find its name and icon in this file.
+The window's `xdg_toplevel` app_id (and `WM_CLASS` on X11) is `qa.` and the
+app's name in lowercase with dashes: `qa.notes`, `qa.slack-lite`. Bars and
+switchers that show the app id itself show something readable, and the ones
+that look it up find the name and icon here through `StartupWMClass`. Two
+apps with the same name share an app id, so a dock may group them.
 
 An app that runs without being installed (`qa run`, `qa dev`, or **Just run
 it**) gets the same file with `NoDisplay=true`, so it has its name and icon
