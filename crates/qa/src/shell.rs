@@ -112,7 +112,8 @@ pub struct Shell {
     themes: ThemeWatch,
     history: VecDeque<Vec<Rect>>,
     debug: bool,
-    paste_pending: bool,
+    /// When we last asked the platform for clipboard text, until it answers.
+    paste_pending: Option<std::time::Instant>,
     pub last_title: String,
     /// Draw our own title bar (no server-side decorations).
     csd: bool,
@@ -133,7 +134,7 @@ impl Shell {
             themes: ThemeWatch::new(),
             history: VecDeque::new(),
             debug: std::env::var_os("QA_DEBUG").is_some(),
-            paste_pending: false,
+            paste_pending: None,
             last_title: String::new(),
             csd: false,
             close_hover: false,
@@ -247,7 +248,7 @@ impl Shell {
             }
             PEvent::FocusIn | PEvent::FocusOut => {}
             PEvent::Paste(t) => {
-                self.paste_pending = false;
+                self.paste_pending = None;
                 let over_paste = d.overlay_ui().is_some_and(|o| o.paste_into != 0);
                 if over_paste {
                     d.overlay_ui().unwrap().paste(t);
@@ -395,8 +396,11 @@ impl Shell {
                 self.p.clipboard_set(text);
             }
             let over_paste = d.overlay_ui().is_some_and(|o| o.paste_into != 0);
-            if (self.ui.paste_into != 0 || over_paste || !self.ui.app_paste.is_empty()) && !self.paste_pending {
-                self.paste_pending = true;
+            // An owner that never answers (a hung app, a dead X client)
+            // mustn't block every later paste, so a request expires.
+            let waiting = self.paste_pending.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(2));
+            if (self.ui.paste_into != 0 || over_paste || !self.ui.app_paste.is_empty()) && !waiting {
+                self.paste_pending = Some(std::time::Instant::now());
                 self.p.clipboard_get();
             }
             let cursor = match d.overlay_ui() {

@@ -986,6 +986,11 @@ impl Platform for Wayland {
             let mut data = Vec::new();
             let mut buf = [0u8; 8192];
             loop {
+                // Give up on a source that stops writing without closing.
+                let mut pfd = libc::pollfd { fd: rfd, events: libc::POLLIN, revents: 0 };
+                if unsafe { libc::poll(&mut pfd, 1, 2000) } <= 0 {
+                    break;
+                }
                 let n = unsafe { libc::read(rfd, buf.as_mut_ptr() as *mut _, buf.len()) };
                 if n <= 0 || data.len() > (16 << 20) {
                     break;

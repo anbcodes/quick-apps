@@ -505,7 +505,8 @@ where
             TypedResumableCall::Finished(r) => return Ok(r),
             TypedResumableCall::OutOfFuel(inv) => {
                 throttle(store)?;
-                store.set_fuel(SLICE)?;
+                // A bulk memory op or a big memory.grow can need more than a slice.
+                store.set_fuel(SLICE.max(inv.required_fuel()))?;
                 c = inv.resume(&mut *store)?;
             }
             TypedResumableCall::HostTrap(_) => return Err(Error::new("unexpected host trap")),
@@ -523,6 +524,10 @@ pub struct Setup {
 fn instantiate(s: Setup, shared: Arc<Shared>, tx: Sender<FromApp>) -> Result<(Instance, TypedFunc<(), ()>), String> {
     let mut cfg = Config::default();
     cfg.consume_fuel(true);
+    // Lazy translation charges fuel when a function first runs, and running
+    // out there is an error rather than a pause (wasmi 2), so an app would
+    // die whenever a new function's first call fell at the end of a slice.
+    cfg.compilation_mode(wasmi::CompilationMode::Eager);
     let engine = Engine::new(&cfg);
     let module = Module::new(&engine, &s.wasm).map_err(|e| format!("invalid app.wasm: {e}"))?;
     let host = Host {
